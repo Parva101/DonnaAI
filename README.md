@@ -45,6 +45,15 @@ Backend health check:
 Invoke-WebRequest http://localhost:8000/api/v1/health
 ```
 
+Spotify setup (optional, for player controls + account transfer):
+
+- Create a Spotify app in the Spotify Developer Dashboard.
+- Add redirect URI: `http://localhost:8000/api/v1/auth/spotify/callback`.
+- Set `SPOTIFY_CLIENT_ID` and `SPOTIFY_CLIENT_SECRET` in `backend/.env`.
+- Connect Spotify from `Settings` after login.
+- For playlist/library transfer, connect two Spotify accounts and run transfer from `Settings -> Spotify Transfer`.
+- If Spotify was connected before this update, reconnect Spotify once to grant the new playlist/library scopes.
+
 Database migration workflow:
 
 ```powershell

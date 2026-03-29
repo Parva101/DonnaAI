@@ -148,7 +148,7 @@ export function CalendarPage() {
 
           <div className="mt-4 flex items-center justify-center gap-2 py-4 text-sm text-muted-foreground">
             <Calendar className="h-4 w-4" />
-            <span>Connect Google or Outlook Calendar</span>
+            <span>Connect Google Calendar</span>
           </div>
         </div>
       </div>

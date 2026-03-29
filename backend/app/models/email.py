@@ -40,7 +40,7 @@ class TSVector(TypeDecorator):
 
 
 class Email(TimestampMixin, Base):
-    """Stores synced emails from all providers (Gmail, Outlook, IMAP)."""
+    """Stores synced emails (currently Gmail; schema is multi-provider ready)."""
 
     __tablename__ = "emails"
     __table_args__ = (
@@ -92,6 +92,12 @@ class Email(TimestampMixin, Base):
     category_source: Mapped[str] = mapped_column(
         String(20), nullable=False, default="pending"
     )  # "rule", "ai", "user", "pending"
+    needs_review: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False
+    )
+    human_reviewed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
     # ── Flags ───────────────────────────────────────────────────
     is_read: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)

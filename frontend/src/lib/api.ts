@@ -1,4 +1,19 @@
-import type { User, SessionResponse, ConnectedAccount, EmailListResponse, EmailFull, EmailSyncStatus, SyncAllStatus, EmailCategoryCount, EmailSendResponse, EmailComposeRequest } from "@/types";
+import type {
+  User,
+  SessionResponse,
+  ConnectedAccount,
+  EmailListResponse,
+  EmailFull,
+  EmailSyncStatus,
+  SyncAllStatus,
+  EmailCategoryCount,
+  EmailSendResponse,
+  EmailComposeRequest,
+  InboxConversationListResponse,
+  SpotifyPlayerState,
+  SpotifyTransferRequest,
+  SpotifyTransferSummary,
+} from "@/types";
 
 const API_BASE =
   import.meta.env.VITE_API_BASE_URL ?? "/api/v1";
@@ -27,8 +42,23 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     );
   }
   if (!response.ok) {
-    const text = await response.text();
-    throw new ApiError(text || `Request failed with ${response.status}`, response.status);
+    const raw = await response.text();
+    let message = raw || `Request failed with ${response.status}`;
+    if (raw) {
+      try {
+        const payload = JSON.parse(raw) as { detail?: unknown; error?: unknown };
+        if (typeof payload.detail === "string") {
+          message = payload.detail;
+        } else if (payload.detail !== undefined) {
+          message = JSON.stringify(payload.detail);
+        } else if (typeof payload.error === "string") {
+          message = payload.error;
+        }
+      } catch {
+        // Keep raw text fallback.
+      }
+    }
+    throw new ApiError(message, response.status);
   }
   if (response.status === 204) return null as T;
   return (await response.json()) as T;
@@ -70,6 +100,7 @@ export function deleteConnectedAccount(id: string): Promise<void> {
 // ── OAuth URLs ──────────────────────────────────────────
 export const GOOGLE_LOGIN_URL = `${API_BASE}/auth/google/login`;
 export const GOOGLE_CONNECT_URL = `${API_BASE}/auth/google/connect`;
+export const SPOTIFY_CONNECT_URL = `${API_BASE}/auth/spotify/connect`;
 
 // ── Emails ──────────────────────────────────────────────
 export function listEmails(params?: {
@@ -124,6 +155,65 @@ export function sendEmail(data: EmailComposeRequest): Promise<EmailSendResponse>
   return request<EmailSendResponse>("/emails/send", {
     method: "POST",
     body: JSON.stringify(data),
+  });
+}
+
+// —— Unified Inbox (Phase 3 kickoff) ——————————————————————————————
+export function listInboxConversations(params?: {
+  platform?: string;
+  account_id?: string;
+  unread_only?: boolean;
+  search?: string;
+  limit?: number;
+  offset?: number;
+}): Promise<InboxConversationListResponse> {
+  const qs = new URLSearchParams();
+  if (params?.platform) qs.set("platform", params.platform);
+  if (params?.account_id) qs.set("account_id", params.account_id);
+  if (params?.unread_only !== undefined) qs.set("unread_only", String(params.unread_only));
+  if (params?.search) qs.set("search", params.search);
+  if (params?.limit) qs.set("limit", String(params.limit));
+  if (params?.offset) qs.set("offset", String(params.offset));
+  const query = qs.toString();
+  return request<InboxConversationListResponse>(`/inbox/conversations${query ? `?${query}` : ""}`);
+}
+
+// —— Spotify ———————————————————————————————————————————————
+export function getSpotifyPlayer(accountId?: string): Promise<SpotifyPlayerState> {
+  const qs = accountId ? `?account_id=${accountId}` : "";
+  return request<SpotifyPlayerState>(`/spotify/player${qs}`);
+}
+
+export function spotifyPlay(accountId?: string): Promise<{ status: string }> {
+  const qs = accountId ? `?account_id=${accountId}` : "";
+  return request<{ status: string }>(`/spotify/player/play${qs}`, { method: "POST" });
+}
+
+export function spotifyPause(accountId?: string): Promise<{ status: string }> {
+  const qs = accountId ? `?account_id=${accountId}` : "";
+  return request<{ status: string }>(`/spotify/player/pause${qs}`, { method: "POST" });
+}
+
+export function spotifyNext(accountId?: string): Promise<{ status: string }> {
+  const qs = accountId ? `?account_id=${accountId}` : "";
+  return request<{ status: string }>(`/spotify/player/next${qs}`, { method: "POST" });
+}
+
+export function spotifyPrevious(accountId?: string): Promise<{ status: string }> {
+  const qs = accountId ? `?account_id=${accountId}` : "";
+  return request<{ status: string }>(`/spotify/player/previous${qs}`, { method: "POST" });
+}
+
+export function spotifySetVolume(percent: number, accountId?: string): Promise<{ status: string }> {
+  const qs = new URLSearchParams({ percent: String(percent) });
+  if (accountId) qs.set("account_id", accountId);
+  return request<{ status: string }>(`/spotify/player/volume?${qs.toString()}`, { method: "POST" });
+}
+
+export function spotifyTransferLibrary(payload: SpotifyTransferRequest): Promise<SpotifyTransferSummary> {
+  return request<SpotifyTransferSummary>("/spotify/transfer", {
+    method: "POST",
+    body: JSON.stringify(payload),
   });
 }
 

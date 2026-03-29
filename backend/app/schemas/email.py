@@ -26,6 +26,8 @@ class EmailRead(BaseModel):
     body_html: str | None
     category: str
     category_source: str
+    needs_review: bool
+    human_reviewed_at: datetime | None
     is_read: bool
     is_starred: bool
     is_draft: bool
@@ -52,6 +54,7 @@ class EmailSummary(BaseModel):
     to_addresses: list | None
     category: str
     category_source: str
+    needs_review: bool
     is_read: bool
     is_starred: bool
     has_attachments: bool
