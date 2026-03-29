@@ -165,6 +165,14 @@ export function EmailDetailPanel({
     onEmailUpdated();
   };
 
+  // Confirm current AI category without changing it.
+  const handleAgreeCategory = async () => {
+    if (!email) return;
+    const updated = await updateEmail(email.id, { category: email.category });
+    setEmail(updated);
+    onEmailUpdated();
+  };
+
   // Format address list for display
   const formatAddresses = (
     addrs: { name: string; address: string }[] | null
@@ -360,6 +368,22 @@ export function EmailDetailPanel({
               <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
                 <Paperclip className="h-3 w-3" />
                 <span>This email has attachments</span>
+              </div>
+            )}
+
+            {/* Needs-review banner */}
+            {email.needs_review && (
+              <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 flex items-center justify-between gap-3">
+                <p className="text-xs text-amber-300">
+                  This classification needs human review. You can agree with the
+                  current category or change it.
+                </p>
+                <button
+                  onClick={handleAgreeCategory}
+                  className="shrink-0 h-7 px-2.5 rounded-md bg-amber-400/20 text-amber-200 text-xs font-semibold hover:bg-amber-400/30 transition-colors"
+                >
+                  Agree
+                </button>
               </div>
             )}
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from uuid import UUID
 
 from sqlalchemy import case, func, select, text
@@ -68,6 +69,10 @@ class EmailService:
         update_data = payload.model_dump(exclude_unset=True)
         if "category" in update_data:
             update_data["category_source"] = "user"
+            # User confirmed/changed category for a review-flagged email.
+            if email_obj.needs_review:
+                update_data["needs_review"] = False
+                update_data["human_reviewed_at"] = datetime.now(timezone.utc)
         for field, value in update_data.items():
             setattr(email_obj, field, value)
         self.db.add(email_obj)

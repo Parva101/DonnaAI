@@ -1,3 +1,4 @@
+import { useCallback, useEffect, useState } from "react";
 import {
   MessageSquare,
   Mail,
@@ -7,11 +8,28 @@ import {
   ArrowUpRight,
   Clock,
   Zap,
+  Music2,
+  Loader2,
+  Play,
+  Pause,
+  SkipBack,
+  SkipForward,
+  ExternalLink,
   type LucideIcon,
 } from "lucide-react";
-import { cn, getGreeting } from "@/lib/utils";
 
-// ── Mock data ──────────────────────────────────────────
+import {
+  ApiError,
+  SPOTIFY_CONNECT_URL,
+  getSpotifyPlayer,
+  spotifyNext,
+  spotifyPause,
+  spotifyPlay,
+  spotifyPrevious,
+  spotifySetVolume,
+} from "@/lib/api";
+import { cn, getGreeting } from "@/lib/utils";
+import type { SpotifyPlayerState } from "@/types";
 
 const stats: {
   title: string;
@@ -53,14 +71,13 @@ const stats: {
   },
 ];
 
-type Platform = "slack" | "gmail" | "whatsapp" | "teams" | "outlook";
+type Platform = "slack" | "gmail" | "whatsapp" | "teams";
 
 const platformMeta: Record<Platform, { dot: string; label: string }> = {
   slack: { dot: "bg-green-500", label: "Slack" },
   gmail: { dot: "bg-red-400", label: "Gmail" },
   whatsapp: { dot: "bg-emerald-400", label: "WhatsApp" },
   teams: { dot: "bg-violet-400", label: "Teams" },
-  outlook: { dot: "bg-blue-400", label: "Outlook" },
 };
 
 const recentMessages: {
@@ -91,7 +108,7 @@ const recentMessages: {
     id: "3",
     platform: "whatsapp",
     sender: "Mom",
-    content: "Call me when you get a chance 💕",
+    content: "Call me when you get a chance",
     time: "1 hr ago",
     unread: false,
   },
@@ -115,7 +132,7 @@ const recentMessages: {
     id: "6",
     platform: "slack",
     sender: "Anna Lee",
-    content: "Great work on the demo yesterday! 🎉",
+    content: "Great work on the demo yesterday!",
     time: "5 hr ago",
     unread: false,
   },
@@ -130,28 +147,89 @@ const upcomingEvents = [
 const connectPlatforms = [
   { name: "Gmail", desc: "Sync emails with smart tabs", icon: Mail, connected: false },
   { name: "Slack", desc: "Messages and channels", icon: MessageSquare, connected: false },
-  { name: "Calendar", desc: "Google & Outlook calendars", icon: Clock, connected: false },
+  { name: "Calendar", desc: "Google Calendar", icon: Clock, connected: false },
   { name: "Voice", desc: "Outbound calls via Donna", icon: Phone, connected: false },
 ];
 
-// ── Component ──────────────────────────────────────────
+function renderArtists(state: SpotifyPlayerState | null): string {
+  if (!state?.track?.artists?.length) return "Unknown artist";
+  return state.track.artists.map((a) => a.name).join(", ");
+}
 
 export function DashboardPage() {
   const greeting = getGreeting();
 
+  const [spotifyState, setSpotifyState] = useState<SpotifyPlayerState | null>(null);
+  const [spotifyConnected, setSpotifyConnected] = useState<boolean | null>(null);
+  const [spotifyLoading, setSpotifyLoading] = useState(true);
+  const [spotifyBusy, setSpotifyBusy] = useState(false);
+  const [spotifyError, setSpotifyError] = useState<string | null>(null);
+
+  const fetchSpotifyState = useCallback(async () => {
+    try {
+      const state = await getSpotifyPlayer();
+      setSpotifyState(state);
+      setSpotifyConnected(true);
+      setSpotifyError(null);
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 404) {
+        setSpotifyConnected(false);
+        setSpotifyState(null);
+        setSpotifyError(null);
+      } else if (err instanceof ApiError) {
+        setSpotifyConnected(true);
+        setSpotifyError(err.message);
+      } else {
+        setSpotifyConnected(true);
+        setSpotifyError("Failed to load Spotify state.");
+      }
+    } finally {
+      setSpotifyLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void fetchSpotifyState();
+    const timer = window.setInterval(() => {
+      void fetchSpotifyState();
+    }, 30000);
+    return () => window.clearInterval(timer);
+  }, [fetchSpotifyState]);
+
+  const runPlayerAction = useCallback(
+    async (fn: () => Promise<unknown>) => {
+      setSpotifyBusy(true);
+      setSpotifyError(null);
+      try {
+        await fn();
+        await fetchSpotifyState();
+      } catch (err) {
+        if (err instanceof ApiError) {
+          setSpotifyError(err.message);
+        } else {
+          setSpotifyError("Spotify control request failed.");
+        }
+      } finally {
+        setSpotifyBusy(false);
+      }
+    },
+    [fetchSpotifyState],
+  );
+
+  const handleVolumeDelta = (delta: number) => {
+    const current = spotifyState?.device?.volume_percent;
+    if (current === undefined || current === null) return;
+    const next = Math.max(0, Math.min(100, current + delta));
+    void runPlayerAction(() => spotifySetVolume(next));
+  };
+
   return (
     <div className="space-y-8">
-      {/* Hero */}
       <div>
-        <h2 className="text-2xl font-bold text-foreground tracking-tight">
-          {greeting} 👋
-        </h2>
-        <p className="text-muted-foreground mt-1">
-          Here's your day at a glance
-        </p>
+        <h2 className="text-2xl font-bold text-foreground tracking-tight">{greeting}</h2>
+        <p className="text-muted-foreground mt-1">Here's your day at a glance</p>
       </div>
 
-      {/* Stats */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         {stats.map((stat) => (
           <div
@@ -159,20 +237,14 @@ export function DashboardPage() {
             className="group relative overflow-hidden rounded-xl border border-border bg-card p-5 transition-colors hover:border-primary/20"
           >
             <div className="flex items-center justify-between">
-              <p className="text-sm font-medium text-muted-foreground">
-                {stat.title}
-              </p>
+              <p className="text-sm font-medium text-muted-foreground">{stat.title}</p>
               <div className={cn("rounded-lg p-2", stat.color)}>
                 <stat.icon className="h-4 w-4" />
               </div>
             </div>
             <div className="mt-3 flex items-end gap-2">
-              <span className="text-3xl font-bold text-foreground tracking-tight">
-                {stat.value}
-              </span>
-              <span className="mb-1 text-sm text-muted-foreground">
-                {stat.detail}
-              </span>
+              <span className="text-3xl font-bold text-foreground tracking-tight">{stat.value}</span>
+              <span className="mb-1 text-sm text-muted-foreground">{stat.detail}</span>
             </div>
             {stat.trend && (
               <div className="mt-2 flex items-center gap-1 text-xs text-success">
@@ -184,9 +256,7 @@ export function DashboardPage() {
         ))}
       </div>
 
-      {/* Main grid */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Recent Messages */}
         <div className="lg:col-span-2 rounded-xl border border-border bg-card">
           <div className="flex items-center justify-between p-5 border-b border-border">
             <h3 className="font-semibold text-foreground">Recent Messages</h3>
@@ -202,14 +272,9 @@ export function DashboardPage() {
                   key={msg.id}
                   className="flex items-start gap-3.5 px-5 py-3.5 hover:bg-secondary/40 transition-colors cursor-pointer"
                 >
-                  {/* Platform dot */}
                   <div className="mt-2 flex flex-col items-center gap-1.5">
-                    <span
-                      className={cn("h-2.5 w-2.5 rounded-full shrink-0", meta.dot)}
-                      title={meta.label}
-                    />
+                    <span className={cn("h-2.5 w-2.5 rounded-full shrink-0", meta.dot)} title={meta.label} />
                   </div>
-                  {/* Content */}
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2">
                       <span
@@ -233,14 +298,9 @@ export function DashboardPage() {
                       {msg.content}
                     </p>
                   </div>
-                  {/* Time + unread */}
                   <div className="flex flex-col items-end gap-1 shrink-0">
-                    <span className="text-[11px] text-muted-foreground whitespace-nowrap">
-                      {msg.time}
-                    </span>
-                    {msg.unread && (
-                      <span className="h-2 w-2 rounded-full bg-primary" />
-                    )}
+                    <span className="text-[11px] text-muted-foreground whitespace-nowrap">{msg.time}</span>
+                    {msg.unread && <span className="h-2 w-2 rounded-full bg-primary" />}
                   </div>
                 </div>
               );
@@ -248,9 +308,7 @@ export function DashboardPage() {
           </div>
         </div>
 
-        {/* Right column */}
         <div className="space-y-6">
-          {/* Today's Schedule */}
           <div className="rounded-xl border border-border bg-card">
             <div className="flex items-center justify-between p-5 border-b border-border">
               <h3 className="font-semibold text-foreground">Today's Schedule</h3>
@@ -266,11 +324,9 @@ export function DashboardPage() {
                 >
                   <div className={cn("h-9 w-1 rounded-full shrink-0", event.color)} />
                   <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium text-foreground truncate">
-                      {event.title}
-                    </p>
+                    <p className="text-sm font-medium text-foreground truncate">{event.title}</p>
                     <p className="text-xs text-muted-foreground">
-                      {event.time} · {event.duration}
+                      {event.time} | {event.duration}
                     </p>
                   </div>
                   <ArrowUpRight className="h-4 w-4 text-muted-foreground shrink-0" />
@@ -279,12 +335,137 @@ export function DashboardPage() {
             </div>
           </div>
 
-          {/* Connect Platforms */}
           <div className="rounded-xl border border-border bg-card">
             <div className="flex items-center justify-between p-5 border-b border-border">
-              <h3 className="font-semibold text-foreground">
-                Connect Platforms
-              </h3>
+              <h3 className="font-semibold text-foreground">Spotify</h3>
+              <Music2 className="h-4 w-4 text-green-400" />
+            </div>
+
+            <div className="p-4 space-y-3">
+              {spotifyLoading ? (
+                <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Loading player...
+                </div>
+              ) : spotifyConnected === false ? (
+                <div className="space-y-2">
+                  <p className="text-sm text-muted-foreground">Connect Spotify to control playback from Donna.</p>
+                  <a
+                    href={SPOTIFY_CONNECT_URL}
+                    className="inline-flex items-center gap-2 h-8 px-3 rounded-lg bg-green-500/15 text-green-300 text-xs font-semibold hover:bg-green-500/25 transition-colors"
+                  >
+                    <Music2 className="h-3.5 w-3.5" />
+                    Connect Spotify
+                  </a>
+                </div>
+              ) : !spotifyState?.has_active_device || !spotifyState?.track ? (
+                <div className="space-y-2">
+                  <p className="text-sm text-muted-foreground">Spotify is connected, but no active player is available.</p>
+                  <button
+                    onClick={() => void fetchSpotifyState()}
+                    className="inline-flex items-center gap-2 h-8 px-3 rounded-lg border border-border text-xs text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors"
+                  >
+                    Refresh
+                  </button>
+                </div>
+              ) : (
+                <>
+                  <div className="flex items-center gap-3">
+                    {spotifyState.track.album_image_url ? (
+                      <img
+                        src={spotifyState.track.album_image_url}
+                        alt={spotifyState.track.name}
+                        className="h-12 w-12 rounded-md object-cover border border-border"
+                      />
+                    ) : (
+                      <div className="h-12 w-12 rounded-md border border-border bg-secondary flex items-center justify-center">
+                        <Music2 className="h-5 w-5 text-muted-foreground" />
+                      </div>
+                    )}
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-semibold text-foreground truncate">{spotifyState.track.name}</p>
+                      <p className="text-xs text-muted-foreground truncate">{renderArtists(spotifyState)}</p>
+                      <p className="text-[11px] text-muted-foreground truncate">
+                        {spotifyState.device?.name || "Unknown device"}
+                      </p>
+                    </div>
+                    {spotifyState.track.external_url && (
+                      <a
+                        href={spotifyState.track.external_url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-muted-foreground hover:text-foreground"
+                        title="Open in Spotify"
+                      >
+                        <ExternalLink className="h-4 w-4" />
+                      </a>
+                    )}
+                  </div>
+
+                  <div className="flex items-center justify-center gap-2">
+                    <button
+                      onClick={() => void runPlayerAction(() => spotifyPrevious())}
+                      disabled={spotifyBusy}
+                      className="h-8 w-8 rounded-full border border-border bg-secondary/50 text-muted-foreground hover:text-foreground disabled:opacity-60"
+                      title="Previous"
+                    >
+                      <SkipBack className="h-4 w-4 mx-auto" />
+                    </button>
+                    <button
+                      onClick={() =>
+                        void runPlayerAction(() =>
+                          spotifyState.is_playing ? spotifyPause() : spotifyPlay(),
+                        )
+                      }
+                      disabled={spotifyBusy}
+                      className="h-9 w-9 rounded-full bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-60"
+                      title={spotifyState.is_playing ? "Pause" : "Play"}
+                    >
+                      {spotifyState.is_playing ? (
+                        <Pause className="h-4 w-4 mx-auto" />
+                      ) : (
+                        <Play className="h-4 w-4 mx-auto" />
+                      )}
+                    </button>
+                    <button
+                      onClick={() => void runPlayerAction(() => spotifyNext())}
+                      disabled={spotifyBusy}
+                      className="h-8 w-8 rounded-full border border-border bg-secondary/50 text-muted-foreground hover:text-foreground disabled:opacity-60"
+                      title="Next"
+                    >
+                      <SkipForward className="h-4 w-4 mx-auto" />
+                    </button>
+                  </div>
+
+                  <div className="flex items-center justify-between">
+                    <button
+                      onClick={() => handleVolumeDelta(-10)}
+                      disabled={spotifyBusy || spotifyState.device?.volume_percent === null}
+                      className="h-7 px-2 rounded-md border border-border text-xs text-muted-foreground hover:text-foreground disabled:opacity-60"
+                    >
+                      Vol -
+                    </button>
+                    <span className="text-xs text-muted-foreground">
+                      Volume {spotifyState.device?.volume_percent ?? "--"}%
+                    </span>
+                    <button
+                      onClick={() => handleVolumeDelta(10)}
+                      disabled={spotifyBusy || spotifyState.device?.volume_percent === null}
+                      className="h-7 px-2 rounded-md border border-border text-xs text-muted-foreground hover:text-foreground disabled:opacity-60"
+                    >
+                      Vol +
+                    </button>
+                  </div>
+                </>
+              )}
+
+              {spotifyError && <p className="text-xs text-destructive">{spotifyError}</p>}
+            </div>
+          </div>
+
+          <div className="rounded-xl border border-border bg-card">
+            <div className="flex items-center justify-between p-5 border-b border-border">
+              <h3 className="font-semibold text-foreground">Connect Platforms</h3>
               <Zap className="h-4 w-4 text-warning" />
             </div>
             <div className="p-4 space-y-2">
@@ -297,9 +478,7 @@ export function DashboardPage() {
                     <p.icon className="h-4 w-4" />
                   </div>
                   <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium text-foreground">
-                      {p.name}
-                    </p>
+                    <p className="text-sm font-medium text-foreground">{p.name}</p>
                     <p className="text-xs text-muted-foreground">{p.desc}</p>
                   </div>
                   <span className="text-xs text-primary opacity-0 group-hover:opacity-100 transition-opacity font-medium">

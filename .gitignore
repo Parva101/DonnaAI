@@ -87,6 +87,16 @@ pnpm-debug.log*
 # ----------------------------
 build/
 dist/
+backend/uv.lock
+
+# ----------------------------
+# Notebook / local scratch
+# ----------------------------
+.ipynb_checkpoints/
+*.tmp
+*.temp
+*.bak
+*.orig
 
 # ----------------------------
 # OS / editor

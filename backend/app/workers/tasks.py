@@ -97,9 +97,11 @@ async def _sync_and_classify_async(account_id: UUID, user_id: UUID) -> None:
             for attempt in range(MAX_RETRIES):
                 try:
                     results = await classify_emails_batch(chunk)
-                    for email_obj, (category, source) in zip(chunk, results):
+                    for email_obj, (category, source, needs_review) in zip(chunk, results):
                         email_obj.category = category
                         email_obj.category_source = source
+                        email_obj.needs_review = needs_review
+                        email_obj.human_reviewed_at = None
                     db.commit()
                     total_classified += len(chunk)
                     success = True
@@ -160,9 +162,11 @@ async def _sync_from_push_async(account_id: UUID, user_id: UUID, history_id: str
 
             try:
                 results = await classify_emails_batch(new_emails)
-                for email_obj, (category, source) in zip(new_emails, results):
+                for email_obj, (category, source, needs_review) in zip(new_emails, results):
                     email_obj.category = category
                     email_obj.category_source = source
+                    email_obj.needs_review = needs_review
+                    email_obj.human_reviewed_at = None
                 db.commit()
                 logger.info(f"[Push Sync] Classified {len(new_emails)} new emails")
             except Exception as e:

@@ -55,9 +55,11 @@ async def run():
                 res = await asyncio.wait_for(
                     classify_emails_batch(chunk), timeout=TIMEOUT
                 )
-                for email_obj, (cat, src) in zip(chunk, res):
+                for email_obj, (cat, src, needs_review) in zip(chunk, res):
                     email_obj.category = cat
                     email_obj.category_source = src
+                    email_obj.needs_review = needs_review
+                    email_obj.human_reviewed_at = None
                 db.commit()
                 ok += len(chunk)
                 done = True

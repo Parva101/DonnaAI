@@ -402,6 +402,11 @@ export function EmailPage() {
                     >
                       {catMeta.label}
                     </span>
+                    {email.needs_review && (
+                      <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-400 border border-amber-500/30">
+                        Needs Review
+                      </span>
+                    )}
                   </div>
                   <p
                     className={cn(
