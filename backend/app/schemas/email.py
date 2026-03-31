@@ -27,13 +27,13 @@ class EmailRead(BaseModel):
     category: str
     category_source: str
     needs_review: bool
-    human_reviewed_at: datetime | None
     is_read: bool
     is_starred: bool
     is_draft: bool
     has_attachments: bool
     gmail_labels: list | None
     received_at: datetime | None
+    human_reviewed_at: datetime | None
     created_at: datetime
     updated_at: datetime
 

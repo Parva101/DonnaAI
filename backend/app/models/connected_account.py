@@ -4,6 +4,7 @@ import uuid
 from datetime import datetime
 
 from sqlalchemy import DateTime, ForeignKey, JSON, String, Text, Uuid, UniqueConstraint
+from sqlalchemy.ext.mutable import MutableDict
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base, TimestampMixin
@@ -33,6 +34,9 @@ class ConnectedAccount(TimestampMixin, Base):
     refresh_token_encrypted: Mapped[str | None] = mapped_column(Text, nullable=True)
     token_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     scopes: Mapped[str | None] = mapped_column(Text, nullable=True)
-    account_metadata: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    account_metadata: Mapped[dict | None] = mapped_column(
+        MutableDict.as_mutable(JSON),
+        nullable=True,
+    )
 
     user: Mapped["User"] = relationship(back_populates="connected_accounts")

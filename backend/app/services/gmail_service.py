@@ -272,7 +272,7 @@ class GmailService:
         - Subsequent syncs: uses Gmail history API to fetch only new messages.
         Returns the list of newly created Email objects.
         """
-        metadata = self.account.account_metadata or {}
+        metadata = dict(self.account.account_metadata or {})
         last_history_id = metadata.get("last_history_id")
 
         if last_history_id:
@@ -283,7 +283,7 @@ class GmailService:
             new_emails = await self._full_sync()
 
         # Update sync metadata
-        metadata = self.account.account_metadata or {}
+        metadata = dict(self.account.account_metadata or {})
         metadata["last_sync_at"] = datetime.now(timezone.utc).isoformat()
         metadata["total_synced"] = metadata.get("total_synced", 0) + len(new_emails)
 
@@ -350,7 +350,7 @@ class GmailService:
             logger.info("No new messages since last sync ✓")
             # Still update historyId
             if latest_history_id:
-                metadata = self.account.account_metadata or {}
+                metadata = dict(self.account.account_metadata or {})
                 metadata["last_history_id"] = latest_history_id
                 self.account.account_metadata = metadata
             return []
@@ -546,7 +546,7 @@ class GmailService:
             data = resp.json()
 
         # Store watch metadata on the account
-        metadata = self.account.account_metadata or {}
+        metadata = dict(self.account.account_metadata or {})
         metadata["watch_expiration"] = data.get("expiration")
         metadata["watch_history_id"] = data.get("historyId")
         self.account.account_metadata = metadata
@@ -569,7 +569,7 @@ class GmailService:
             )
             resp.raise_for_status()
 
-        metadata = self.account.account_metadata or {}
+        metadata = dict(self.account.account_metadata or {})
         metadata.pop("watch_expiration", None)
         metadata.pop("watch_history_id", None)
         self.account.account_metadata = metadata

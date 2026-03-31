@@ -264,6 +264,8 @@ def test_update_email_reclassify(client_with_emails):
     data = resp.json()
     assert data["category"] == "finance"
     assert data["category_source"] == "user"
+    assert data["needs_review"] is False
+    assert data["human_reviewed_at"] is not None
 
 
 def test_update_email_not_found(authed_client: TestClient):
