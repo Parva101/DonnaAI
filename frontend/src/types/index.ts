@@ -60,6 +60,8 @@ export type EmailSummary = {
   to_addresses: { name: string; address: string }[] | null;
   category: string;
   category_source: string;
+  priority_score: number;
+  priority_label: string;
   needs_review: boolean;
   is_read: boolean;
   is_starred: boolean;
@@ -94,16 +96,24 @@ export type EmailListResponse = {
 };
 
 export type EmailSyncStatus = {
+  job_id: string;
   status: string;
-  synced: number;
-  classified: number;
-  account_id: string;
+  stage: string;
+  mode: string;
+  accounts_total: number;
+  accounts_done: number;
+  fetched_total: number;
+  classify_total: number;
+  classified_done: number;
+  failed_count: number;
+  remaining_pending: number;
+  error: string | null;
+  started_at: string | null;
+  finished_at: string | null;
 };
 
 export type SyncAllStatus = {
-  status: string;
-  accounts_queued: number;
-  account_ids: string[];
+  job: EmailSyncStatus;
 };
 
 export type EmailComposeRequest = {
@@ -127,7 +137,7 @@ export type InboxConversationSummary = {
   conversation_id: string;
   platform: string;
   account_id: string;
-  latest_email_id: string;
+  latest_email_id: string | null;
   sender: string;
   sender_address: string | null;
   subject: string | null;
@@ -217,4 +227,307 @@ export type SpotifyTransferSummary = {
   saved_albums_transferred: number;
   warnings: string[];
   playlist_results: SpotifyPlaylistTransferResult[];
+};
+
+export type NewsArticle = {
+  id: string;
+  title: string;
+  url: string;
+  source: string;
+  summary: string | null;
+  topic: string;
+  relevance_score: number;
+  published_at: string | null;
+  is_bookmarked: boolean;
+};
+
+export type NewsListResponse = {
+  articles: NewsArticle[];
+};
+
+export type NewsSourceRead = {
+  id: string;
+  user_id: string;
+  source_type: string;
+  name: string;
+  url: string | null;
+  topic: string;
+  enabled: boolean;
+  fetch_interval_minutes: number;
+  created_at: string;
+  updated_at: string;
+};
+
+export type NewsSourceListResponse = {
+  sources: NewsSourceRead[];
+};
+
+export type NewsBookmarkRead = {
+  article_id: string;
+  title: string;
+  url: string;
+  source: string;
+  topic: string;
+  published_at: string | null;
+  bookmarked_at: string;
+};
+
+export type NewsBookmarkListResponse = {
+  bookmarks: NewsBookmarkRead[];
+};
+
+export type WhatsAppStatus = {
+  running: boolean;
+  pid: number | null;
+  device_id: string;
+  qr_data_uri: string | null;
+  qr_text: string | null;
+  messages_log_exists: boolean;
+  connection_state?: string | null;
+  me_jid?: string | null;
+  state_updated_at?: string | null;
+  state_age_seconds?: number | null;
+};
+
+export type WhatsAppConversationSummary = {
+  account_id: string;
+  conversation_id: string;
+  sender: string;
+  preview: string | null;
+  unread_count: number;
+  message_count: number;
+  has_attachments: boolean;
+  latest_received_at: string | null;
+  is_group: boolean;
+};
+
+export type WhatsAppConversationListResponse = {
+  conversations: WhatsAppConversationSummary[];
+  total: number;
+};
+
+export type WhatsAppConversationMessage = {
+  message_id: string | null;
+  sender: string | null;
+  from_me: boolean;
+  text: string | null;
+  message_type: string | null;
+  timestamp: number | null;
+  received_at: string | null;
+};
+
+export type WhatsAppConversationMessagesResponse = {
+  messages: WhatsAppConversationMessage[];
+  total: number;
+};
+
+export type SlackConversationSummary = {
+  account_id: string;
+  conversation_id: string;
+  name: string | null;
+  sender: string;
+  preview: string | null;
+  unread_count: number;
+  message_count: number;
+  has_attachments: boolean;
+  latest_received_at: string | null;
+  is_im: boolean;
+  is_private: boolean;
+};
+
+export type SlackConversationListResponse = {
+  conversations: SlackConversationSummary[];
+  total: number;
+};
+
+export type SlackMessage = {
+  ts: string;
+  sender: string | null;
+  user_id: string | null;
+  text: string | null;
+  subtype: string | null;
+  thread_ts: string | null;
+  has_attachments: boolean;
+};
+
+export type SlackMessageListResponse = {
+  messages: SlackMessage[];
+  total: number;
+};
+
+export type SlackSendResponse = {
+  status: string;
+  channel: string;
+  ts: string;
+};
+
+export type TeamsConversationSummary = {
+  account_id: string;
+  conversation_id: string;
+  name: string | null;
+  sender: string;
+  preview: string | null;
+  unread_count: number;
+  message_count: number;
+  has_attachments: boolean;
+  latest_received_at: string | null;
+};
+
+export type TeamsConversationListResponse = {
+  conversations: TeamsConversationSummary[];
+  total: number;
+};
+
+export type TeamsMessage = {
+  id: string;
+  sender: string | null;
+  from_me: boolean;
+  text: string | null;
+  created_at: string | null;
+  has_attachments: boolean;
+};
+
+export type TeamsMessageListResponse = {
+  messages: TeamsMessage[];
+  total: number;
+};
+
+export type TeamsSendResponse = {
+  status: string;
+  conversation_id: string;
+  message_id: string | null;
+};
+
+export type TeamsPresenceResponse = {
+  account_id: string;
+  availability: string;
+  activity: string;
+};
+
+export type CalendarEvent = {
+  account_id: string;
+  provider: string;
+  event_id: string;
+  title: string;
+  description: string | null;
+  location: string | null;
+  start_at: string;
+  end_at: string;
+  attendees: string[];
+  organizer: string | null;
+  is_all_day: boolean;
+};
+
+export type CalendarEventListResponse = {
+  events: CalendarEvent[];
+  total: number;
+};
+
+export type BusyBlock = {
+  start_at: string;
+  end_at: string;
+};
+
+export type SuggestSlotsResponse = {
+  slots: BusyBlock[];
+};
+
+export type NotificationPreferences = {
+  email_enabled: boolean;
+  slack_enabled: boolean;
+  whatsapp_enabled: boolean;
+  teams_enabled: boolean;
+  focus_mode: boolean;
+  daily_digest_enabled: boolean;
+  daily_digest_hour_utc: number;
+};
+
+export type NotificationPreferencesResponse = {
+  preferences: NotificationPreferences;
+};
+
+export type DigestItem = {
+  title: string;
+  source: string;
+  preview: string;
+  url: string | null;
+};
+
+export type DailyDigestResponse = {
+  generated_at: string;
+  summary: string;
+  top_items: DigestItem[];
+};
+
+export type ActionItem = {
+  id: string;
+  user_id: string;
+  source_platform: string;
+  source_ref: string | null;
+  title: string;
+  details: string | null;
+  status: string;
+  priority: string;
+  score: number;
+  due_at: string | null;
+  completed_at: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type ActionItemListResponse = {
+  items: ActionItem[];
+  total: number;
+};
+
+export type ActionItemExtractResponse = {
+  items: ActionItem[];
+};
+
+export type PriorityScoreResult = {
+  email_id: string;
+  score: number;
+  label: string;
+};
+
+export type PriorityScoreResponse = {
+  results: PriorityScoreResult[];
+};
+
+export type ReplySuggestionsResponse = {
+  suggestions: string[];
+};
+
+export type SemanticSearchItem = {
+  email_id: string;
+  score: number;
+  subject: string | null;
+  from_address: string | null;
+  snippet: string | null;
+  category: string;
+};
+
+export type SemanticSearchResponse = {
+  results: SemanticSearchItem[];
+};
+
+export type VoiceCall = {
+  id: string;
+  user_id: string;
+  target_name: string | null;
+  target_phone: string | null;
+  intent: string;
+  status: string;
+  transcript: string | null;
+  summary: string | null;
+  outcome: string | null;
+  started_at: string | null;
+  completed_at: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type VoiceCallListResponse = {
+  calls: VoiceCall[];
+  total: number;
 };

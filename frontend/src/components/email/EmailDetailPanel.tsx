@@ -22,6 +22,7 @@ const CATEGORY_META: Record<string, { label: string; color: string }> = {
   finance: { label: "Finance", color: "bg-green-500/20 text-green-400" },
   travel: { label: "Travel", color: "bg-orange-500/20 text-orange-400" },
   promotions: { label: "Promotions", color: "bg-pink-500/20 text-pink-400" },
+  newsletters: { label: "Newsletters", color: "bg-indigo-500/20 text-indigo-400" },
   orders: { label: "Orders", color: "bg-amber-500/20 text-amber-400" },
   notifications: {
     label: "Notifications",
@@ -40,6 +41,7 @@ const ALL_CATEGORIES = [
   "finance",
   "travel",
   "promotions",
+  "newsletters",
   "orders",
   "notifications",
 ];

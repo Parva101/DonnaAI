@@ -8,6 +8,7 @@ from sqlalchemy import (
     Boolean,
     Column,
     DateTime,
+    Float,
     ForeignKey,
     Index,
     Integer,
@@ -93,6 +94,8 @@ class Email(TimestampMixin, Base):
     category_source: Mapped[str] = mapped_column(
         String(20), nullable=False, default="pending"
     )  # "rule", "ai", "user", "pending"
+    priority_score: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    priority_label: Mapped[str] = mapped_column(String(12), nullable=False, default="low")
     needs_review: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False
     )

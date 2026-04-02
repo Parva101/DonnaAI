@@ -1,10 +1,4 @@
-"""Multi-agent email classification with human-review feedback examples.
-
-Pipeline:
-1. Coarse router (super-group classification)
-2. Specialist per routed group
-3. Arbiter only for disputed/low-confidence/review cases
-"""
+"""Multi-agent email classification with human-review feedback examples."""
 
 from __future__ import annotations
 
@@ -13,8 +7,8 @@ import logging
 from dataclasses import dataclass
 from uuid import UUID
 
-from langchain_core.messages import HumanMessage, SystemMessage
-from langchain_google_genai import ChatGoogleGenerativeAI
+from google import genai
+from google.genai import types as genai_types
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 
@@ -57,7 +51,8 @@ FALLBACK_CATEGORY_BY_GROUP = {
     "personal": "personal",
 }
 
-AI_SOURCE = "ai-gemini"
+AI_SOURCE = "gemini-multiagent"
+VERTEX_MODEL = "gemini-2.5-flash-lite"
 MODEL_EMAIL_BATCH_SIZE = 20
 COARSE_CONFIDENCE_THRESHOLD = 0.70
 SPECIALIST_CONFIDENCE_THRESHOLD = 0.70
@@ -65,7 +60,6 @@ COARSE_BODY_LIMIT = 6000
 ARBITER_BODY_LIMIT = 6000
 SPECIALIST_BODY_LIMIT = 10000
 
-# Human-reviewed examples used as few-shot guidance.
 MAX_PROMPT_EXAMPLES = 3
 MAX_EXAMPLE_POOL = 30
 EXAMPLE_BODY_LIMIT = 400
@@ -345,40 +339,49 @@ def _build_arbiter_payload(
     return arbiter_payload
 
 
-def _get_model() -> ChatGoogleGenerativeAI:
+def _get_client() -> genai.Client:
     from app.core.config import settings
 
     if not settings.google_api_key:
         raise RuntimeError("GOOGLE_API_KEY not set")
-
-    return ChatGoogleGenerativeAI(
-        model="gemini-2.5-flash",
-        google_api_key=settings.google_api_key,
-        temperature=0,
-    )
+    return genai.Client(vertexai=True, api_key=settings.google_api_key)
 
 
 async def _invoke_structured(
-    model: ChatGoogleGenerativeAI,
+    client: genai.Client,
     schema: type[BaseModel],
     system_prompt: str,
     payload: dict,
 ) -> BaseModel:
-    runnable = model.with_structured_output(schema)
-    return await runnable.ainvoke(
-        [
-            SystemMessage(content=system_prompt),
-            HumanMessage(content=_serialize_payload(payload)),
-        ]
+    response = await client.aio.models.generate_content(
+        model=VERTEX_MODEL,
+        contents=_serialize_payload(payload),
+        config=genai_types.GenerateContentConfig(
+            system_instruction=system_prompt,
+            response_mime_type="application/json",
+            response_schema=schema,
+            temperature=0,
+        ),
     )
+
+    parsed = getattr(response, "parsed", None)
+    if isinstance(parsed, schema):
+        return parsed
+    if parsed is not None:
+        return schema.model_validate(parsed)
+
+    text = (response.text or "").strip()
+    if not text:
+        raise ValueError("Model returned empty response")
+    return schema.model_validate_json(text)
 
 
 async def _run_coarse_router(
-    model: ChatGoogleGenerativeAI,
+    client: genai.Client,
     coarse_payload: dict[int, dict[str, str]],
 ) -> dict[int, CoarseEmailClassification]:
     structured = await _invoke_structured(
-        model,
+        client,
         CoarseBatchClassificationResult,
         COARSE_ROUTER_SYSTEM,
         coarse_payload,
@@ -408,7 +411,7 @@ async def _run_coarse_router(
 
 
 async def _run_specialists(
-    model: ChatGoogleGenerativeAI,
+    client: genai.Client,
     specialist_email_payload: dict[int, dict[str, str]],
     coarse_by_no: dict[int, CoarseEmailClassification],
     recent_examples: list[dict[str, str]],
@@ -432,7 +435,7 @@ async def _run_specialists(
         }
         try:
             structured = await _invoke_structured(
-                model,
+                client,
                 SpecialistBatchClassificationResult,
                 _specialist_system_prompt(coarse_group),
                 payload,
@@ -460,7 +463,7 @@ async def _run_specialists(
 
 
 async def _run_arbiter(
-    model: ChatGoogleGenerativeAI,
+    client: genai.Client,
     arbiter_payload: dict[int, dict],
     recent_examples: list[dict[str, str]],
 ) -> dict[int, ArbiterEmailClassification]:
@@ -469,7 +472,7 @@ async def _run_arbiter(
         "human_labeled_examples": _examples_for_arbiter(recent_examples),
     }
     structured = await _invoke_structured(
-        model,
+        client,
         ArbiterBatchClassificationResult,
         ARBITER_SYSTEM,
         payload,
@@ -489,7 +492,7 @@ async def _run_arbiter(
 
 
 async def _classify_batch_multiagent(
-    model: ChatGoogleGenerativeAI,
+    client: genai.Client,
     email_objs: list[Email],
     *,
     global_offset: int,
@@ -501,9 +504,9 @@ async def _classify_batch_multiagent(
     user_id = email_objs[0].user_id if email_objs and email_objs[0].user_id else None
     recent_examples = _fetch_recent_human_examples(user_id) if user_id else []
 
-    coarse_by_no = await _run_coarse_router(model, coarse_payload)
+    coarse_by_no = await _run_coarse_router(client, coarse_payload)
     specialist_by_no = await _run_specialists(
-        model,
+        client,
         specialist_payload,
         coarse_by_no,
         recent_examples,
@@ -548,7 +551,7 @@ async def _classify_batch_multiagent(
             needs_arbiter,
         )
         try:
-            final_by_no = await _run_arbiter(model, arbiter_payload, recent_examples)
+            final_by_no = await _run_arbiter(client, arbiter_payload, recent_examples)
         except Exception:
             logger.exception("Arbiter stage failed; using deterministic fallback")
             final_by_no = {}
@@ -568,7 +571,7 @@ async def _classify_batch_multiagent(
     for i, (category, _, needs_review) in enumerate(results, 1):
         email_obj = email_objs[i - 1]
         logger.info(
-            "[Gemini Multiagent] Email %s/%s (global %s) | %s | %s -> %s | needs_review=%s",
+            "[Vertex Multiagent] Email %s/%s (global %s) | %s | %s -> %s | needs_review=%s",
             i,
             len(email_objs),
             global_offset + i,
@@ -582,32 +585,32 @@ async def _classify_batch_multiagent(
 
 
 async def classify_emails_batch(email_objs: list[Email]) -> list[tuple[str, str, bool]]:
-    """Classify emails via multi-agent Gemini pipeline.
-
-    Returns list[(category, source, needs_review)] in the input order.
-    """
+    """Classify emails via multi-agent Vertex Gemini pipeline."""
     if not email_objs:
         return []
 
-    model = _get_model()
+    client = _get_client()
     logger.info(
-        "Classifying %s emails via Gemini multi-agent pipeline",
+        "Classifying %s emails via Vertex Gemini multi-agent pipeline",
         len(email_objs),
     )
 
     all_results: list[tuple[str, str, bool]] = []
-    for offset in range(0, len(email_objs), MODEL_EMAIL_BATCH_SIZE):
-        batch = email_objs[offset : offset + MODEL_EMAIL_BATCH_SIZE]
-        batch_results = await _classify_batch_multiagent(
-            model,
-            batch,
-            global_offset=offset,
-        )
-        all_results.extend(batch_results)
+    try:
+        for offset in range(0, len(email_objs), MODEL_EMAIL_BATCH_SIZE):
+            batch = email_objs[offset : offset + MODEL_EMAIL_BATCH_SIZE]
+            batch_results = await _classify_batch_multiagent(
+                client,
+                batch,
+                global_offset=offset,
+            )
+            all_results.extend(batch_results)
+    finally:
+        await client.aio.aclose()
 
     classified_count = sum(1 for _, source, _ in all_results if source == AI_SOURCE)
     logger.info(
-        "Gemini multi-agent classification complete: %s/%s classified",
+        "Vertex Gemini classification complete: %s/%s classified",
         classified_count,
         len(email_objs),
     )

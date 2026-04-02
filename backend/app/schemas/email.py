@@ -26,6 +26,8 @@ class EmailRead(BaseModel):
     body_html: str | None
     category: str
     category_source: str
+    priority_score: float
+    priority_label: str
     needs_review: bool
     is_read: bool
     is_starred: bool
@@ -54,6 +56,8 @@ class EmailSummary(BaseModel):
     to_addresses: list | None
     category: str
     category_source: str
+    priority_score: float
+    priority_label: str
     needs_review: bool
     is_read: bool
     is_starred: bool
@@ -101,13 +105,21 @@ class EmailSyncRequest(BaseModel):
 
 
 class EmailSyncStatus(BaseModel):
+    job_id: UUID
     status: str
-    synced: int
-    classified: int
-    account_id: UUID
+    stage: str
+    mode: str
+    accounts_total: int
+    accounts_done: int
+    fetched_total: int
+    classify_total: int
+    classified_done: int
+    failed_count: int
+    remaining_pending: int
+    error: str | None = None
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
 
 
 class SyncAllStatus(BaseModel):
-    status: str
-    accounts_queued: int
-    account_ids: list[UUID]
+    job: EmailSyncStatus

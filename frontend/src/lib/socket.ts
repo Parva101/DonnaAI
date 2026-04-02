@@ -1,15 +1,13 @@
 /**
- * Socket.IO client — provides a singleton socket instance and a React hook.
- *
- * The socket connects to the backend WebSocket server mounted at /ws.
- * It auto-connects when the user is authenticated and disconnects on logout.
+ * Socket.IO client singleton + lifecycle hook.
  */
 
-import { useEffect, useRef } from "react";
+import { useEffect } from "react";
 import { io, Socket } from "socket.io-client";
+
 import { useAuthStore } from "@/stores/authStore";
 
-const WS_URL = import.meta.env.VITE_WS_URL ?? "http://localhost:8000";
+const WS_URL = import.meta.env.VITE_WS_URL ?? "http://localhost:8010";
 
 let socket: Socket | null = null;
 
@@ -26,13 +24,30 @@ export function getSocket(): Socket {
 }
 
 /**
- * Hook that manages socket lifecycle based on auth state.
- * Call once at the app shell level.
- *
- * Currently disabled — WebSockets will be activated in Phase 3
- * when real-time messaging (Slack, WhatsApp, Teams) needs instant push.
+ * Connect when user is authenticated and join user room for targeted events.
  */
 export function useSocket() {
-  // No-op for now — re-enable when we need real-time push
-  return null;
+  const user = useAuthStore((s) => s.user);
+
+  useEffect(() => {
+    const s = getSocket();
+
+    if (!user?.id) {
+      if (s.connected) {
+        s.disconnect();
+      }
+      return;
+    }
+
+    if (!s.connected) {
+      s.connect();
+    }
+    s.emit("join", { user_id: user.id });
+
+    return () => {
+      s.emit("leave", { user_id: user.id });
+    };
+  }, [user?.id]);
+
+  return getSocket();
 }

@@ -1,27 +1,35 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
-  MessageSquare,
-  Mail,
-  Phone,
-  ListChecks,
-  TrendingUp,
   ArrowUpRight,
-  Clock,
-  Zap,
-  Music2,
+  ExternalLink,
+  ListChecks,
   Loader2,
-  Play,
+  Mail,
+  MessageSquare,
+  Music2,
+  Newspaper,
   Pause,
+  Phone,
+  Play,
   SkipBack,
   SkipForward,
-  ExternalLink,
+  TrendingUp,
   type LucideIcon,
 } from "lucide-react";
+import { format, formatDistanceToNow, isToday, parseISO } from "date-fns";
 
 import {
   ApiError,
   SPOTIFY_CONNECT_URL,
+  getDailyDigest,
+  getTeamsPresence,
   getSpotifyPlayer,
+  listActionItems,
+  listCalendarEvents,
+  listEmails,
+  listInboxConversations,
+  listNewsArticles,
+  listVoiceCalls,
   spotifyNext,
   spotifyPause,
   spotifyPlay,
@@ -29,131 +37,55 @@ import {
   spotifySetVolume,
 } from "@/lib/api";
 import { cn, getGreeting } from "@/lib/utils";
-import type { SpotifyPlayerState } from "@/types";
+import type {
+  ActionItem,
+  CalendarEvent,
+  DailyDigestResponse,
+  InboxConversationSummary,
+  NewsArticle,
+  SpotifyPlayerState,
+  TeamsPresenceResponse,
+} from "@/types";
 
-const stats: {
-  title: string;
-  value: string;
-  detail: string;
-  icon: LucideIcon;
-  trend?: string;
-  color: string;
-}[] = [
-  {
-    title: "Messages",
-    value: "24",
-    detail: "+5 today",
-    icon: MessageSquare,
-    trend: "+12%",
-    color: "text-primary bg-primary/10",
-  },
-  {
-    title: "Emails",
-    value: "12",
-    detail: "unread",
-    icon: Mail,
-    color: "text-purple-400 bg-purple-400/10",
-  },
-  {
-    title: "Calls",
-    value: "3",
-    detail: "today",
-    icon: Phone,
-    color: "text-success bg-success/10",
-  },
-  {
-    title: "Tasks",
-    value: "7",
-    detail: "2 urgent",
-    icon: ListChecks,
-    trend: "",
-    color: "text-warning bg-warning/10",
-  },
-];
-
-type Platform = "slack" | "gmail" | "whatsapp" | "teams";
+type Platform = "gmail" | "slack" | "whatsapp" | "teams";
 
 const platformMeta: Record<Platform, { dot: string; label: string }> = {
-  slack: { dot: "bg-green-500", label: "Slack" },
   gmail: { dot: "bg-red-400", label: "Gmail" },
+  slack: { dot: "bg-green-500", label: "Slack" },
   whatsapp: { dot: "bg-emerald-400", label: "WhatsApp" },
   teams: { dot: "bg-violet-400", label: "Teams" },
 };
 
-const recentMessages: {
-  id: string;
-  platform: Platform;
-  sender: string;
-  content: string;
-  time: string;
-  unread: boolean;
-}[] = [
-  {
-    id: "1",
-    platform: "slack",
-    sender: "John Chen",
-    content: "Hey, can you review the PR for the auth module?",
-    time: "2 min ago",
-    unread: true,
-  },
-  {
-    id: "2",
-    platform: "gmail",
-    sender: "Sarah Miller",
-    content: "Q3 Report is attached. Please review by EOD.",
-    time: "15 min ago",
-    unread: true,
-  },
-  {
-    id: "3",
-    platform: "whatsapp",
-    sender: "Mom",
-    content: "Call me when you get a chance",
-    time: "1 hr ago",
-    unread: false,
-  },
-  {
-    id: "4",
-    platform: "teams",
-    sender: "Mike Johnson",
-    content: "Design review meeting moved to 3pm tomorrow",
-    time: "2 hr ago",
-    unread: false,
-  },
-  {
-    id: "5",
-    platform: "gmail",
-    sender: "GitHub",
-    content: "Pull request #42 has been approved and merged",
-    time: "3 hr ago",
-    unread: false,
-  },
-  {
-    id: "6",
-    platform: "slack",
-    sender: "Anna Lee",
-    content: "Great work on the demo yesterday!",
-    time: "5 hr ago",
-    unread: false,
-  },
-];
-
-const upcomingEvents = [
-  { id: "1", title: "Team Standup", time: "10:00 AM", duration: "30 min", color: "bg-primary" },
-  { id: "2", title: "Design Review", time: "2:00 PM", duration: "1 hr", color: "bg-purple-500" },
-  { id: "3", title: "1:1 with Mike", time: "4:30 PM", duration: "30 min", color: "bg-success" },
-];
-
-const connectPlatforms = [
-  { name: "Gmail", desc: "Sync emails with smart tabs", icon: Mail, connected: false },
-  { name: "Slack", desc: "Messages and channels", icon: MessageSquare, connected: false },
-  { name: "Calendar", desc: "Google Calendar", icon: Clock, connected: false },
-  { name: "Voice", desc: "Outbound calls via Donna", icon: Phone, connected: false },
-];
-
 function renderArtists(state: SpotifyPlayerState | null): string {
   if (!state?.track?.artists?.length) return "Unknown artist";
   return state.track.artists.map((a) => a.name).join(", ");
+}
+
+function formatEventTime(event: CalendarEvent): string {
+  try {
+    const start = parseISO(event.start_at);
+    const end = parseISO(event.end_at);
+    if (event.is_all_day) return "All day";
+    return `${format(start, "p")} - ${format(end, "p")}`;
+  } catch {
+    return "Unknown time";
+  }
+}
+
+function calcEventDuration(event: CalendarEvent): string {
+  try {
+    const start = parseISO(event.start_at).getTime();
+    const end = parseISO(event.end_at).getTime();
+    const mins = Math.max(Math.round((end - start) / 60000), 0);
+    if (mins >= 60) {
+      const h = Math.floor(mins / 60);
+      const rem = mins % 60;
+      return rem ? `${h}h ${rem}m` : `${h}h`;
+    }
+    return `${mins}m`;
+  } catch {
+    return "";
+  }
 }
 
 export function DashboardPage() {
@@ -164,6 +96,15 @@ export function DashboardPage() {
   const [spotifyLoading, setSpotifyLoading] = useState(true);
   const [spotifyBusy, setSpotifyBusy] = useState(false);
   const [spotifyError, setSpotifyError] = useState<string | null>(null);
+
+  const [digest, setDigest] = useState<DailyDigestResponse | null>(null);
+  const [actionItems, setActionItems] = useState<ActionItem[]>([]);
+  const [teamsPresence, setTeamsPresence] = useState<TeamsPresenceResponse | null>(null);
+  const [inboxRows, setInboxRows] = useState<InboxConversationSummary[]>([]);
+  const [calendarRows, setCalendarRows] = useState<CalendarEvent[]>([]);
+  const [newsRows, setNewsRows] = useState<NewsArticle[]>([]);
+  const [unreadEmails, setUnreadEmails] = useState(0);
+  const [todayCalls, setTodayCalls] = useState(0);
 
   const fetchSpotifyState = useCallback(async () => {
     try {
@@ -188,6 +129,50 @@ export function DashboardPage() {
     }
   }, []);
 
+  const loadDashboard = useCallback(async () => {
+    try {
+      const [
+        inboxRes,
+        calendarRes,
+        newsRes,
+        digestRes,
+        actionRes,
+        presenceRes,
+        emailsRes,
+        callsRes,
+      ] = await Promise.all([
+        listInboxConversations({ limit: 6 }),
+        listCalendarEvents({ limit: 3 }),
+        listNewsArticles({ topic: "all", limit: 4 }),
+        getDailyDigest(),
+        listActionItems("open"),
+        getTeamsPresence().catch(() => null),
+        listEmails({ is_read: false, limit: 1 }),
+        listVoiceCalls(50),
+      ]);
+
+      setInboxRows(inboxRes.conversations);
+      setCalendarRows(calendarRes.events.slice(0, 3));
+      setNewsRows(newsRes.articles.slice(0, 4));
+      setDigest(digestRes);
+      setActionItems(actionRes.items.slice(0, 5));
+      setTeamsPresence(presenceRes);
+      setUnreadEmails(emailsRes.total);
+
+      const callsToday = callsRes.calls.filter((call) => {
+        if (!call.created_at) return false;
+        try {
+          return isToday(parseISO(call.created_at));
+        } catch {
+          return false;
+        }
+      });
+      setTodayCalls(callsToday.length);
+    } catch {
+      // Keep dashboard resilient if one integration is unavailable.
+    }
+  }, []);
+
   useEffect(() => {
     void fetchSpotifyState();
     const timer = window.setInterval(() => {
@@ -195,6 +180,10 @@ export function DashboardPage() {
     }, 30000);
     return () => window.clearInterval(timer);
   }, [fetchSpotifyState]);
+
+  useEffect(() => {
+    void loadDashboard();
+  }, [loadDashboard]);
 
   const runPlayerAction = useCallback(
     async (fn: () => Promise<unknown>) => {
@@ -223,11 +212,53 @@ export function DashboardPage() {
     void runPlayerAction(() => spotifySetVolume(next));
   };
 
+  const stats: {
+    title: string;
+    value: string;
+    detail: string;
+    icon: LucideIcon;
+    trend?: string;
+    color: string;
+  }[] = useMemo(
+    () => [
+      {
+        title: "Messages",
+        value: String(inboxRows.reduce((acc, row) => acc + row.unread_count, 0)),
+        detail: "unread across inbox",
+        icon: MessageSquare,
+        color: "text-primary bg-primary/10",
+      },
+      {
+        title: "Emails",
+        value: String(unreadEmails),
+        detail: "unread",
+        icon: Mail,
+        color: "text-purple-400 bg-purple-400/10",
+      },
+      {
+        title: "Calls",
+        value: String(todayCalls),
+        detail: "today",
+        icon: Phone,
+        color: "text-success bg-success/10",
+      },
+      {
+        title: "Tasks",
+        value: String(actionItems.length),
+        detail: "open",
+        icon: ListChecks,
+        trend: actionItems.length > 0 ? "Active" : "",
+        color: "text-warning bg-warning/10",
+      },
+    ],
+    [actionItems.length, inboxRows, todayCalls, unreadEmails],
+  );
+
   return (
     <div className="space-y-8">
       <div>
         <h2 className="text-2xl font-bold text-foreground tracking-tight">{greeting}</h2>
-        <p className="text-muted-foreground mt-1">Here's your day at a glance</p>
+        <p className="text-muted-foreground mt-1">Here is your live command center snapshot.</p>
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -259,79 +290,69 @@ export function DashboardPage() {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="lg:col-span-2 rounded-xl border border-border bg-card">
           <div className="flex items-center justify-between p-5 border-b border-border">
-            <h3 className="font-semibold text-foreground">Recent Messages</h3>
-            <button className="text-xs text-primary hover:text-primary/80 font-medium transition-colors">
-              View all
-            </button>
+            <h3 className="font-semibold text-foreground">Recent Conversations</h3>
           </div>
           <div className="divide-y divide-border">
-            {recentMessages.map((msg) => {
-              const meta = platformMeta[msg.platform];
-              return (
-                <div
-                  key={msg.id}
-                  className="flex items-start gap-3.5 px-5 py-3.5 hover:bg-secondary/40 transition-colors cursor-pointer"
-                >
-                  <div className="mt-2 flex flex-col items-center gap-1.5">
-                    <span className={cn("h-2.5 w-2.5 rounded-full shrink-0", meta.dot)} title={meta.label} />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2">
-                      <span
-                        className={cn(
-                          "text-sm font-medium truncate",
-                          msg.unread ? "text-foreground" : "text-muted-foreground",
-                        )}
-                      >
-                        {msg.sender}
-                      </span>
-                      <span className="text-[10px] uppercase tracking-wider text-muted-foreground">
-                        {meta.label}
-                      </span>
+            {inboxRows.length === 0 ? (
+              <div className="px-5 py-8 text-sm text-muted-foreground">No conversations yet. Connect accounts from Settings.</div>
+            ) : (
+              inboxRows.map((msg) => {
+                const meta = platformMeta[(msg.platform as Platform) ?? "gmail"] ?? platformMeta.gmail;
+                return (
+                  <div
+                    key={`${msg.platform}-${msg.conversation_id}`}
+                    className="flex items-start gap-3.5 px-5 py-3.5 hover:bg-secondary/40 transition-colors"
+                  >
+                    <div className="mt-2 flex flex-col items-center gap-1.5">
+                      <span className={cn("h-2.5 w-2.5 rounded-full shrink-0", meta.dot)} title={meta.label} />
                     </div>
-                    <p
-                      className={cn(
-                        "text-sm mt-0.5 truncate",
-                        msg.unread ? "text-foreground/80" : "text-muted-foreground",
-                      )}
-                    >
-                      {msg.content}
-                    </p>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-medium text-foreground truncate">{msg.sender}</span>
+                        <span className="text-[10px] uppercase tracking-wider text-muted-foreground">{meta.label}</span>
+                      </div>
+                      <p className="text-sm mt-0.5 truncate text-muted-foreground">{msg.preview || msg.subject || "(no preview)"}</p>
+                    </div>
+                    <div className="flex flex-col items-end gap-1 shrink-0">
+                      <span className="text-[11px] text-muted-foreground whitespace-nowrap">
+                        {msg.latest_received_at
+                          ? formatDistanceToNow(parseISO(msg.latest_received_at), { addSuffix: true })
+                          : ""}
+                      </span>
+                      {msg.unread_count > 0 && <span className="h-2 w-2 rounded-full bg-primary" />}
+                    </div>
                   </div>
-                  <div className="flex flex-col items-end gap-1 shrink-0">
-                    <span className="text-[11px] text-muted-foreground whitespace-nowrap">{msg.time}</span>
-                    {msg.unread && <span className="h-2 w-2 rounded-full bg-primary" />}
-                  </div>
-                </div>
-              );
-            })}
+                );
+              })
+            )}
           </div>
         </div>
 
         <div className="space-y-6">
           <div className="rounded-xl border border-border bg-card">
             <div className="flex items-center justify-between p-5 border-b border-border">
-              <h3 className="font-semibold text-foreground">Today's Schedule</h3>
-              <button className="text-xs text-primary hover:text-primary/80 font-medium transition-colors">
-                Calendar
-              </button>
+              <h3 className="font-semibold text-foreground">Calendar</h3>
             </div>
             <div className="p-4 space-y-3">
-              {upcomingEvents.map((event) => (
-                <div
-                  key={event.id}
-                  className="flex items-center gap-3 rounded-lg p-3 bg-secondary/40 hover:bg-secondary/60 transition-colors"
-                >
-                  <div className={cn("h-9 w-1 rounded-full shrink-0", event.color)} />
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium text-foreground truncate">{event.title}</p>
-                    <p className="text-xs text-muted-foreground">
-                      {event.time} | {event.duration}
-                    </p>
+              {calendarRows.length === 0 ? (
+                <p className="text-xs text-muted-foreground">No upcoming events in the selected window.</p>
+              ) : (
+                calendarRows.map((event) => (
+                  <div
+                    key={`${event.provider}-${event.event_id}`}
+                    className="flex items-center gap-3 rounded-lg p-3 bg-secondary/40 hover:bg-secondary/60 transition-colors"
+                  >
+                    <div className="h-9 w-1 rounded-full shrink-0 bg-primary" />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium text-foreground truncate">{event.title}</p>
+                      <p className="text-xs text-muted-foreground">
+                        {formatEventTime(event)} | {calcEventDuration(event)}
+                      </p>
+                    </div>
+                    <ArrowUpRight className="h-4 w-4 text-muted-foreground shrink-0" />
                   </div>
-                  <ArrowUpRight className="h-4 w-4 text-muted-foreground shrink-0" />
-                </div>
-              ))}
+                ))
+              )}
             </div>
           </div>
 
@@ -361,12 +382,6 @@ export function DashboardPage() {
               ) : !spotifyState?.has_active_device || !spotifyState?.track ? (
                 <div className="space-y-2">
                   <p className="text-sm text-muted-foreground">Spotify is connected, but no active player is available.</p>
-                  <button
-                    onClick={() => void fetchSpotifyState()}
-                    className="inline-flex items-center gap-2 h-8 px-3 rounded-lg border border-border text-xs text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors"
-                  >
-                    Refresh
-                  </button>
                 </div>
               ) : (
                 <>
@@ -465,27 +480,76 @@ export function DashboardPage() {
 
           <div className="rounded-xl border border-border bg-card">
             <div className="flex items-center justify-between p-5 border-b border-border">
-              <h3 className="font-semibold text-foreground">Connect Platforms</h3>
-              <Zap className="h-4 w-4 text-warning" />
+              <h3 className="font-semibold text-foreground">Top News</h3>
+              <Newspaper className="h-4 w-4 text-orange-400" />
             </div>
             <div className="p-4 space-y-2">
-              {connectPlatforms.map((p) => (
-                <button
-                  key={p.name}
-                  className="flex w-full items-center gap-3 rounded-lg p-3 text-left bg-secondary/40 hover:bg-secondary/60 transition-colors group"
-                >
-                  <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary/10 text-primary shrink-0">
-                    <p.icon className="h-4 w-4" />
+              {newsRows.length === 0 ? (
+                <p className="text-xs text-muted-foreground">No stories yet. Open News and run Fetch to populate.</p>
+              ) : (
+                newsRows.map((article) => (
+                  <a
+                    key={article.id}
+                    href={article.url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="block rounded-lg border border-border/60 bg-secondary/20 p-3 hover:border-primary/40"
+                  >
+                    <p className="text-xs text-primary uppercase tracking-wide">{article.source}</p>
+                    <p className="text-sm text-foreground mt-1 line-clamp-2">{article.title}</p>
+                    {article.summary && (
+                      <p className="text-xs text-muted-foreground mt-1 line-clamp-2">{article.summary}</p>
+                    )}
+                  </a>
+                ))
+              )}
+            </div>
+          </div>
+
+          <div className="rounded-xl border border-border bg-card">
+            <div className="flex items-center justify-between p-5 border-b border-border">
+              <h3 className="font-semibold text-foreground">Daily Briefing</h3>
+            </div>
+            <div className="p-4 space-y-3">
+              {digest ? (
+                <>
+                  <p className="text-xs text-muted-foreground">{digest.summary}</p>
+                  {digest.top_items.slice(0, 3).map((item, idx) => (
+                    <div key={`${item.title}-${idx}`} className="rounded-lg border border-border/60 bg-secondary/20 p-3">
+                      <p className="text-xs text-primary uppercase tracking-wide">{item.source}</p>
+                      <p className="text-sm text-foreground mt-1 line-clamp-2">{item.title}</p>
+                    </div>
+                  ))}
+                </>
+              ) : (
+                <p className="text-xs text-muted-foreground">Daily digest will appear after first sync.</p>
+              )}
+              {teamsPresence && (
+                <p className="text-xs text-muted-foreground">
+                  Teams presence: <span className="text-foreground">{teamsPresence.availability}</span> ({teamsPresence.activity})
+                </p>
+              )}
+            </div>
+          </div>
+
+          <div className="rounded-xl border border-border bg-card">
+            <div className="flex items-center justify-between p-5 border-b border-border">
+              <h3 className="font-semibold text-foreground">Action Items</h3>
+              <ListChecks className="h-4 w-4 text-warning" />
+            </div>
+            <div className="p-4 space-y-2">
+              {actionItems.length === 0 ? (
+                <p className="text-xs text-muted-foreground">No open items yet. AI extraction will populate this list.</p>
+              ) : (
+                actionItems.map((item) => (
+                  <div key={item.id} className="rounded-lg border border-border/60 bg-secondary/20 p-3">
+                    <p className="text-sm text-foreground line-clamp-2">{item.title}</p>
+                    <p className="text-[11px] text-muted-foreground mt-1 uppercase tracking-wide">
+                      {item.priority} priority - {item.source_platform}
+                    </p>
                   </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium text-foreground">{p.name}</p>
-                    <p className="text-xs text-muted-foreground">{p.desc}</p>
-                  </div>
-                  <span className="text-xs text-primary opacity-0 group-hover:opacity-100 transition-opacity font-medium">
-                    Connect
-                  </span>
-                </button>
-              ))}
+                ))
+              )}
             </div>
           </div>
         </div>

@@ -1,4 +1,4 @@
-import { FormEvent, useState, useEffect, useMemo } from "react";
+﻿import { FormEvent, useState, useEffect, useMemo } from "react";
 import { useSearchParams } from "react-router";
 import {
   Settings,
@@ -25,11 +25,15 @@ import {
   ApiError,
   listConnectedAccounts,
   deleteConnectedAccount,
+  getWhatsAppStatus,
   GOOGLE_CONNECT_URL,
+  SLACK_CONNECT_URL,
+  TEAMS_CONNECT_URL,
   SPOTIFY_CONNECT_URL,
+  WHATSAPP_CONNECT_URL,
   spotifyTransferLibrary,
 } from "@/lib/api";
-import type { ConnectedAccount, SpotifyTransferSummary } from "@/types";
+import type { ConnectedAccount, SpotifyTransferSummary, WhatsAppStatus } from "@/types";
 
 type PlatformConfig = {
   name: string;
@@ -42,10 +46,10 @@ type PlatformConfig = {
 
 const platforms: PlatformConfig[] = [
   { name: "Gmail", desc: "Email with smart tabs", icon: Mail, provider: "google", color: "text-red-400", connectUrl: GOOGLE_CONNECT_URL },
-  { name: "Slack", desc: "Messages & channels", icon: MessageSquare, provider: "slack", color: "text-green-400" },
-  { name: "Teams", desc: "Microsoft Teams chat", icon: MessageSquare, provider: "teams", color: "text-violet-400" },
-  { name: "WhatsApp", desc: "Personal number bridge", icon: Phone, provider: "whatsapp", color: "text-emerald-400" },
-  { name: "Google Calendar", desc: "Events & scheduling", icon: Calendar, provider: "google_calendar", color: "text-blue-400" },
+  { name: "Slack", desc: "Messages & channels", icon: MessageSquare, provider: "slack", color: "text-green-400", connectUrl: SLACK_CONNECT_URL },
+  { name: "Teams", desc: "Microsoft Teams chat", icon: MessageSquare, provider: "teams", color: "text-violet-400", connectUrl: TEAMS_CONNECT_URL },
+  { name: "WhatsApp", desc: "Personal number bridge", icon: Phone, provider: "whatsapp", color: "text-emerald-400", connectUrl: WHATSAPP_CONNECT_URL },
+  { name: "Google Calendar", desc: "Events & scheduling", icon: Calendar, provider: "google", color: "text-blue-400", connectUrl: GOOGLE_CONNECT_URL },
   { name: "Spotify", desc: "Music playback control", icon: Music, provider: "spotify", color: "text-green-400", connectUrl: SPOTIFY_CONNECT_URL },
   { name: "News Sources", desc: "RSS, NewsAPI, Hacker News", icon: Newspaper, provider: "news", color: "text-orange-400" },
 ];
@@ -78,6 +82,7 @@ export function SettingsPage() {
   const [transferBusy, setTransferBusy] = useState(false);
   const [transferError, setTransferError] = useState<string | null>(null);
   const [transferResult, setTransferResult] = useState<SpotifyTransferSummary | null>(null);
+  const [whatsappStatus, setWhatsappStatus] = useState<WhatsAppStatus | null>(null);
 
   const [searchParams] = useSearchParams();
 
@@ -94,6 +99,31 @@ export function SettingsPage() {
         .catch(() => {});
     }
   }, [user]);
+
+  useEffect(() => {
+    if (!user) return;
+    if (!connectedAccounts.some((a) => a.provider === "whatsapp")) {
+      setWhatsappStatus(null);
+      return;
+    }
+    let cancelled = false;
+    const loadStatus = () => {
+      getWhatsAppStatus()
+        .then((status) => {
+          if (!cancelled) setWhatsappStatus(status);
+        })
+        .catch(() => {
+          if (!cancelled) setWhatsappStatus(null);
+        });
+    };
+
+    loadStatus();
+    const timer = window.setInterval(loadStatus, 10_000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [user, connectedAccounts]);
 
   // Show success message from OAuth redirect
   useEffect(() => {
@@ -370,7 +400,7 @@ export function SettingsPage() {
                             </p>
                             {needsGmailScopes && (
                               <p className="text-[11px] text-amber-400 mt-0.5">
-                                ⚠ Gmail access not granted
+                                âš  Gmail access not granted
                               </p>
                             )}
                           </div>
@@ -409,6 +439,41 @@ export function SettingsPage() {
                         <Plus className="h-3 w-3" />
                         Add another account
                       </a>
+                    )}
+
+                    {p.provider === "whatsapp" && connected && whatsappStatus && (
+                      <div className="ml-14 rounded-lg border border-border/50 bg-secondary/20 p-3 space-y-2">
+                        <p className="text-xs text-muted-foreground">
+                          Bridge status:{" "}
+                          <span className={whatsappStatus.running ? "text-green-400" : "text-amber-400"}>
+                            {whatsappStatus.connection_state ?? (whatsappStatus.running ? "running" : "not running")}
+                          </span>
+                          {whatsappStatus.pid ? ` (pid ${whatsappStatus.pid})` : ""}
+                        </p>
+                        {whatsappStatus.connection_state === "connected" ? (
+                          <div className="rounded-md border border-emerald-500/30 bg-emerald-500/5 p-2">
+                            <p className="text-xs font-medium text-emerald-300">WhatsApp linked successfully</p>
+                            <p className="mt-1 text-[11px] text-muted-foreground">
+                              {whatsappStatus.me_jid
+                                ? `Connected as ${whatsappStatus.me_jid}`
+                                : "Bridge is authenticated and active."}
+                            </p>
+                          </div>
+                        ) : (
+                          <>
+                            {whatsappStatus.qr_data_uri && (
+                              <img
+                                src={whatsappStatus.qr_data_uri}
+                                alt="WhatsApp QR"
+                                className="h-40 w-40 rounded-md border border-border bg-background p-1"
+                              />
+                            )}
+                            <p className="text-[11px] text-muted-foreground">
+                              Scan this QR in WhatsApp: Linked devices -&gt; Link a device.
+                            </p>
+                          </>
+                        )}
+                      </div>
                     )}
                   </div>
                 );

@@ -37,5 +37,13 @@ celery.conf.update(
             "task": "renew_gmail_watches",
             "schedule": crontab(hour=3, minute=0, day_of_week="*/6"),  # Every 6 days at 3am
         },
+        "fetch-news-updates": {
+            "task": "fetch_news_updates",
+            "schedule": crontab(minute="*/30"),
+        },
+        "generate-daily-briefings": {
+            "task": "generate_daily_briefings",
+            "schedule": crontab(hour=settings.morning_briefing_hour_utc, minute=0),
+        },
     },
 )

@@ -1,0 +1,10 @@
+- generic [ref=e4]:
+  - generic [ref=e5]:
+    - generic [ref=e7]: D
+    - heading "Welcome to Donna" [level=1] [ref=e8]
+    - paragraph [ref=e9]: Your AI-powered personal assistant
+  - link "Sign in with Google" [ref=e11] [cursor=pointer]:
+    - /url: /api/v1/auth/google/login
+    - img [ref=e12]
+    - text: Sign in with Google
+  - button "Dev sign-in ->" [ref=e18]

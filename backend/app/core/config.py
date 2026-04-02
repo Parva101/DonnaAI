@@ -18,6 +18,7 @@ class Settings(BaseSettings):
 
     # Session / JWT
     session_secret_key: str = "dev-session-secret-key-change-me-32"
+    token_encryption_key: str = ""
     session_cookie_name: str = "donna_session"
     session_expire_minutes: int = 60 * 24 * 7
     session_cookie_secure: bool = False
@@ -33,12 +34,25 @@ class Settings(BaseSettings):
     # Google OAuth 2.0
     google_client_id: str = ""
     google_client_secret: str = ""
-    google_redirect_uri: str = "http://localhost:8000/api/v1/auth/google/callback"
+    google_redirect_uri: str = "http://localhost:8010/api/v1/auth/google/callback"
 
     # Spotify OAuth 2.0
     spotify_client_id: str = ""
     spotify_client_secret: str = ""
-    spotify_redirect_uri: str = "http://localhost:8000/api/v1/auth/spotify/callback"
+    spotify_redirect_uri: str = "http://localhost:8010/api/v1/auth/spotify/callback"
+
+    # Slack OAuth 2.0
+    slack_client_id: str = ""
+    slack_client_secret: str = ""
+    slack_redirect_uri: str = "http://localhost:8010/api/v1/auth/slack/callback"
+    slack_signing_secret: str = ""
+
+    # Microsoft / Teams OAuth 2.0
+    microsoft_client_id: str = ""
+    microsoft_client_secret: str = ""
+    microsoft_tenant_id: str = "common"
+    microsoft_redirect_uri: str = "http://localhost:8010/api/v1/auth/teams/callback"
+    teams_graph_base_url: str = "https://graph.microsoft.com/v1.0"
 
     # Redis
     redis_url: str = "redis://localhost:6379/0"
@@ -55,9 +69,28 @@ class Settings(BaseSettings):
     # Google Gemini
     google_api_key: str = ""
 
+    # News
+    news_api_key: str = ""
+    news_fetch_interval_minutes: int = 30
+
+    # Daily briefing / notifications
+    morning_briefing_hour_utc: int = 13
+
+    # Voice providers (optional placeholders)
+    livekit_url: str = ""
+    livekit_api_key: str = ""
+    livekit_api_secret: str = ""
+    twilio_account_sid: str = ""
+    twilio_auth_token: str = ""
+    twilio_phone_number: str = ""
+
     # Gmail Push (Pub/Sub)
     gmail_pubsub_topic: str = ""
     gmail_webhook_url: str = ""
+
+    # WhatsApp bridge
+    whatsapp_bridge_runtime_dir: str = "../whatsapp_bridge/runtime"
+    whatsapp_bridge_device_id: str = "donna-whatsapp-poc"
 
     model_config = SettingsConfigDict(
         env_file=os.path.join(
