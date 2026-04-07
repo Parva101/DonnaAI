@@ -39,6 +39,23 @@ Optional WhatsApp bridge container:
 docker compose --profile whatsapp up -d --build
 ```
 
+## GCP Deployment (Compute Engine)
+
+Use the GCP override compose profile:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.gcp.yml up -d --build
+```
+
+This runs:
+- Frontend on `http://<VM_PUBLIC_IP>/` (port 80, via Nginx)
+- Backend on `http://<VM_PUBLIC_IP>:8010` (optional direct access)
+- API and WebSocket proxied under same origin (`/api/*`, `/ws/*`)
+
+Full instructions:
+- `docs/GCP_DEPLOYMENT.md`
+- VM bootstrap script: `scripts/gcp/bootstrap_vm.sh`
+
 ## Quick Start (Manual Local)
 
 ### Backend

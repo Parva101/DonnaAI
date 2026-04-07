@@ -7,12 +7,15 @@ WORKDIR /app
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
+    libmagic1 \
     && rm -rf /var/lib/apt/lists/*
 
 COPY backend /app
+COPY whatsapp_bridge /whatsapp_bridge
 
 RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir -e .
+    pip install --no-cache-dir -e . && \
+    pip install --no-cache-dir -r /whatsapp_bridge/requirements.txt
 
 EXPOSE 8010
 

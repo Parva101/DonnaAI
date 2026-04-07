@@ -2,10 +2,12 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+import socketio
 
 from app.api.router import api_router
 from app.core.config import settings
 from app.core.db import init_db
+from app.core.socketio_server import sio
 
 
 @asynccontextmanager
@@ -57,13 +59,12 @@ def create_app() -> FastAPI:
         return {"message": "DonnaAI backend is running."}
 
     app.include_router(api_router, prefix=settings.api_prefix)
-
-    # Mount Socket.IO under /ws
-    from app.core.socketio_server import sio_app
-
-    app.mount("/ws", sio_app)
-
     return app
 
 
-app = create_app()
+fastapi_app = create_app()
+app = socketio.ASGIApp(
+    sio,
+    other_asgi_app=fastapi_app,
+    socketio_path="ws/socket.io",
+)

@@ -1,12 +1,10 @@
 """Socket.IO server.
 
-Mounted as an ASGI sub-app on FastAPI under `/ws`.
+Exposed by wrapping FastAPI app with `socketio.ASGIApp` in `app.main`.
 Provides best-effort realtime events for sync progress and inbox updates.
 """
 
 from __future__ import annotations
-
-from typing import Any
 
 import socketio
 
@@ -19,38 +17,6 @@ sio = socketio.AsyncServer(
     logger=False,
     engineio_logger=False,
 )
-
-_inner_app = socketio.ASGIApp(sio, socketio_path="/socket.io")
-
-
-class SafeSocketIOASGI:
-    """Wrap Socket.IO ASGI app and normalize websocket mismatch edge cases."""
-
-    def __init__(self, app: Any) -> None:
-        self.app = app
-
-    async def __call__(self, scope: dict, receive: Any, send: Any) -> None:
-        if scope["type"] == "websocket":
-
-            async def safe_send(message: dict) -> None:
-                if message.get("type") == "http.response.start":
-                    await send({"type": "websocket.close", "code": 1000})
-                    return
-                if message.get("type") == "http.response.body":
-                    return
-                await send(message)
-
-            try:
-                await self.app(scope, receive, safe_send)
-            except Exception:
-                # Avoid crashing the whole app on websocket transport edge cases.
-                pass
-            return
-
-        await self.app(scope, receive, send)
-
-
-sio_app = SafeSocketIOASGI(_inner_app)
 
 
 @sio.event

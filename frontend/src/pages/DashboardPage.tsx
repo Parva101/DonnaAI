@@ -22,6 +22,7 @@ import {
   ApiError,
   SPOTIFY_CONNECT_URL,
   getDailyDigest,
+  listConnectedAccounts,
   getTeamsPresence,
   getSpotifyPlayer,
   listActionItems,
@@ -131,6 +132,10 @@ export function DashboardPage() {
 
   const loadDashboard = useCallback(async () => {
     try {
+      const accounts = await listConnectedAccounts().catch(() => []);
+      const teamsAccount = accounts.find((acc) => acc.provider === "teams");
+      const calendarAccount = accounts.find((acc) => acc.provider === "google");
+
       const [
         inboxRes,
         calendarRes,
@@ -142,11 +147,16 @@ export function DashboardPage() {
         callsRes,
       ] = await Promise.all([
         listInboxConversations({ limit: 6 }),
-        listCalendarEvents({ limit: 3 }),
+        calendarAccount
+          ? listCalendarEvents({ limit: 3, account_id: calendarAccount.id }).catch(() => ({
+              events: [],
+              total: 0,
+            }))
+          : Promise.resolve({ events: [], total: 0 }),
         listNewsArticles({ topic: "all", limit: 4 }),
         getDailyDigest(),
         listActionItems("open"),
-        getTeamsPresence().catch(() => null),
+        teamsAccount ? getTeamsPresence(teamsAccount.id).catch(() => null) : Promise.resolve(null),
         listEmails({ is_read: false, limit: 1 }),
         listVoiceCalls(50),
       ]);

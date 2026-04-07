@@ -7,7 +7,12 @@ import { io, Socket } from "socket.io-client";
 
 import { useAuthStore } from "@/stores/authStore";
 
-const WS_URL = import.meta.env.VITE_WS_URL ?? "http://localhost:8010";
+const DEFAULT_WS_URL =
+  typeof window !== "undefined"
+    ? window.location.origin
+    : "http://localhost:8010";
+
+const WS_URL = import.meta.env.VITE_WS_URL || DEFAULT_WS_URL;
 
 let socket: Socket | null = null;
 

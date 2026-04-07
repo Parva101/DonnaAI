@@ -44,8 +44,11 @@ services:
       CELERY_BROKER_URL: redis://redis:6379/1
       CELERY_RESULT_BACKEND: redis://redis:6379/2
       FRONTEND_URL: http://localhost:5173
+      WHATSAPP_BRIDGE_RUNTIME_DIR: /runtime
     ports:
       - "8010:8010"
+    volumes:
+      - whatsapp_runtime:/runtime
     depends_on:
       postgres:
         condition: service_healthy
@@ -67,12 +70,16 @@ services:
       REDIS_URL: redis://redis:6379/0
       CELERY_BROKER_URL: redis://redis:6379/1
       CELERY_RESULT_BACKEND: redis://redis:6379/2
+      WHATSAPP_BRIDGE_RUNTIME_DIR: /runtime
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
     command: celery -A app.core.celery_app worker --loglevel=info --pool=solo
+
+    volumes:
+      - whatsapp_runtime:/runtime
 
   celery-beat:
     build:
@@ -86,11 +93,14 @@ services:
       REDIS_URL: redis://redis:6379/0
       CELERY_BROKER_URL: redis://redis:6379/1
       CELERY_RESULT_BACKEND: redis://redis:6379/2
+      WHATSAPP_BRIDGE_RUNTIME_DIR: /runtime
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
+    volumes:
+      - whatsapp_runtime:/runtime
     command: celery -A app.core.celery_app beat --loglevel=info
 
   frontend:
