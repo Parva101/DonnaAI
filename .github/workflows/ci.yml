@@ -1,0 +1,60 @@
+name: CI
+
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+    branches: [main, dev]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: donnaai
+          POSTGRES_PASSWORD: donnaai
+          POSTGRES_DB: donnaai
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd "pg_isready -U donnaai -d donnaai"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+
+    env:
+      DATABASE_URL: postgresql+psycopg://donnaai:donnaai@localhost:5433/donnaai
+      REDIS_URL: redis://localhost:6379/0
+      ENVIRONMENT: test
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r services/api/requirements-dev.txt
+
+      - name: Lint
+        run: ruff check services tests
+
+      - name: Run migrations
+        run: alembic -c services/api/alembic.ini upgrade head
+
+      - name: Test
+        run: pytest -q
+
