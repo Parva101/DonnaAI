@@ -20,6 +20,11 @@ import type {
   NewsSourceRead,
   NewsSourceListResponse,
   NotificationPreferencesResponse,
+  SportsGameListResponse,
+  SportsLeagueListResponse,
+  SportsTeamSearchResponse,
+  SportsTrackedTeam,
+  SportsTrackedTeamListResponse,
   PriorityScoreResponse,
   ReplySuggestionsResponse,
   SemanticSearchResponse,
@@ -215,6 +220,58 @@ export function listInboxConversations(params?: {
   if (params?.offset) qs.set("offset", String(params.offset));
   const query = qs.toString();
   return request<InboxConversationListResponse>(`/inbox/conversations${query ? `?${query}` : ""}`);
+}
+
+export function listSportsLeagues(): Promise<SportsLeagueListResponse> {
+  return request<SportsLeagueListResponse>("/sports/leagues");
+}
+
+export function searchSportsTeams(params: {
+  query: string;
+  league?: string;
+  limit?: number;
+}): Promise<SportsTeamSearchResponse> {
+  const qs = new URLSearchParams();
+  qs.set("query", params.query);
+  if (params.league) qs.set("league", params.league);
+  if (params.limit) qs.set("limit", String(params.limit));
+  return request<SportsTeamSearchResponse>(`/sports/teams/search?${qs.toString()}`);
+}
+
+export function listTrackedSportsTeams(league?: string): Promise<SportsTrackedTeamListResponse> {
+  const qs = league ? `?league=${encodeURIComponent(league)}` : "";
+  return request<SportsTrackedTeamListResponse>(`/sports/teams/tracked${qs}`);
+}
+
+export function trackSportsTeam(payload: {
+  league: string;
+  team_id: string;
+  team_name: string;
+  display_name: string;
+  abbreviation?: string | null;
+  logo_url?: string | null;
+}): Promise<SportsTrackedTeam> {
+  return request<SportsTrackedTeam>("/sports/teams/tracked", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function untrackSportsTeam(trackedTeamId: string): Promise<void> {
+  return request<void>(`/sports/teams/tracked/${encodeURIComponent(trackedTeamId)}`, {
+    method: "DELETE",
+  });
+}
+
+export function listSportsLiveScores(params?: {
+  league?: string;
+  limit?: number;
+}): Promise<SportsGameListResponse> {
+  const qs = new URLSearchParams();
+  if (params?.league) qs.set("league", params.league);
+  if (params?.limit) qs.set("limit", String(params.limit));
+  const query = qs.toString();
+  return request<SportsGameListResponse>(`/sports/scores/live${query ? `?${query}` : ""}`);
 }
 
 // —— News ————————————————————————————————————————————————————————————————

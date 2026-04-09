@@ -9,6 +9,7 @@ const pageTitles: Record<string, string> = {
   "/email": "Email Hub",
   "/voice": "Voice Console",
   "/calendar": "Calendar",
+  "/sports": "Sports Tracker",
   "/news": "News Feed",
   "/settings": "Settings",
 };

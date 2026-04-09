@@ -5,6 +5,7 @@ import {
   Mail,
   Phone,
   Calendar,
+  Trophy,
   Newspaper,
   Settings,
   Bot,
@@ -20,6 +21,7 @@ const mainNav = [
   { icon: Mail, label: "Email", to: "/email", badge: 3 },
   { icon: Phone, label: "Voice", to: "/voice" },
   { icon: Calendar, label: "Calendar", to: "/calendar" },
+  { icon: Trophy, label: "Sports", to: "/sports" },
   { icon: Newspaper, label: "News", to: "/news" },
 ];
 

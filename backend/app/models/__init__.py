@@ -9,6 +9,7 @@ from app.models.email_sync_job import EmailSyncJob
 from app.models.news_article import NewsArticle
 from app.models.news_bookmark import NewsBookmark
 from app.models.news_source import NewsSource
+from app.models.sports_tracked_team import SportsTrackedTeam
 from app.models.user import User
 from app.models.voice_call import VoiceCall
 
@@ -24,6 +25,7 @@ __all__ = [
     "NewsArticle",
     "NewsBookmark",
     "NewsSource",
+    "SportsTrackedTeam",
     "User",
     "VoiceCall",
 ]

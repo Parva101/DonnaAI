@@ -12,6 +12,7 @@ from app.api import (
     routes,
     slack,
     slack_auth,
+    sports,
     spotify,
     spotify_auth,
     teams,
@@ -40,6 +41,7 @@ api_router.include_router(ai.router)
 api_router.include_router(notifications.router)
 api_router.include_router(voice.router)
 api_router.include_router(news.router)
+api_router.include_router(sports.router)
 api_router.include_router(whatsapp.router)
 api_router.include_router(spotify.router)
 api_router.include_router(webhooks.router)

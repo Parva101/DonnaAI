@@ -8,6 +8,7 @@ import { EmailPage } from "@/pages/EmailPage";
 import { VoicePage } from "@/pages/VoicePage";
 import { CalendarPage } from "@/pages/CalendarPage";
 import { NewsPage } from "@/pages/NewsPage";
+import { SportsPage } from "@/pages/SportsPage";
 import { SettingsPage } from "@/pages/SettingsPage";
 
 export function App() {
@@ -21,6 +22,7 @@ export function App() {
         <Route path="email" element={<EmailPage />} />
         <Route path="voice" element={<VoicePage />} />
         <Route path="calendar" element={<CalendarPage />} />
+        <Route path="sports" element={<SportsPage />} />
         <Route path="news" element={<NewsPage />} />
         <Route path="settings" element={<SettingsPage />} />
       </Route>

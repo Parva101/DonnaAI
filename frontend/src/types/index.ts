@@ -276,6 +276,80 @@ export type NewsBookmarkListResponse = {
   bookmarks: NewsBookmarkRead[];
 };
 
+export type SportsLeague = {
+  key: string;
+  label: string;
+};
+
+export type SportsLeagueListResponse = {
+  leagues: SportsLeague[];
+};
+
+export type SportsTeam = {
+  league: string;
+  league_label: string;
+  team_id: string;
+  team_name: string;
+  display_name: string;
+  abbreviation: string | null;
+  location: string | null;
+  logo_url: string | null;
+};
+
+export type SportsTeamSearchResponse = {
+  teams: SportsTeam[];
+  total: number;
+};
+
+export type SportsTrackedTeam = SportsTeam & {
+  id: string;
+  user_id: string;
+  created_at: string;
+  updated_at: string;
+};
+
+export type SportsTrackedTeamListResponse = {
+  teams: SportsTrackedTeam[];
+  total: number;
+};
+
+export type SportsGameTeam = {
+  team_id: string;
+  name: string;
+  abbreviation: string | null;
+  logo_url: string | null;
+  home_away: string;
+  score: number | null;
+  winner: boolean | null;
+  record: string | null;
+  tracked: boolean;
+};
+
+export type SportsGame = {
+  game_id: string;
+  league: string;
+  league_label: string;
+  start_time: string | null;
+  status: string;
+  status_detail: string | null;
+  state: string;
+  is_live: boolean;
+  is_final: boolean;
+  is_upcoming: boolean;
+  period: number | null;
+  clock: string | null;
+  venue: string | null;
+  broadcast: string | null;
+  home: SportsGameTeam;
+  away: SportsGameTeam;
+};
+
+export type SportsGameListResponse = {
+  generated_at: string;
+  games: SportsGame[];
+  total: number;
+};
+
 export type WhatsAppStatus = {
   running: boolean;
   pid: number | null;
