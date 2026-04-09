@@ -22,7 +22,9 @@ This is the authoritative continuity file for DonnaAI. Update this file on every
 
 ## Current Technical Reality (2026-04-09)
 - Gmail is the only provider with durable first-class message persistence (`emails` table).
-- Slack/Teams/WhatsApp are largely fetched live through service adapters and are not yet persisted as first-class message records in Donna DB.
+- Slack/Teams/WhatsApp persist normalized chat data in Donna DB (`chat_conversations`, `chat_messages`, `chat_outbound_actions`).
+- Slack + Teams support webhook ingestion for near-real-time message persistence.
+- WhatsApp currently uses an OpenClaw-compatible adapter for transport, but Donna persists all synced conversations/messages into canonical chat tables.
 - OpenClaw gateway-based integration code exists in Donna backend and can remain as temporary scaffolding, but target direction is native Donna-managed connector workers and persistence.
 
 ## Platform Strategy
@@ -58,3 +60,13 @@ This is the authoritative continuity file for DonnaAI. Update this file on every
 
 ## Last Updated
 - 2026-04-09
+
+## Latest Implementation Update (2026-04-09)
+- Added explicit chat ingestion APIs:
+  - `POST /api/v1/inbox/sync/chats` for cross-platform sync runs (`all`, `slack`, `teams`, `whatsapp`)
+  - `POST /api/v1/whatsapp/sync` for WhatsApp account ingestion runs
+- Added calendar event creation:
+  - `POST /api/v1/calendar/events` (Google Calendar create)
+- Added sports-to-calendar action:
+  - `POST /api/v1/sports/calendar/events` creates a calendar event from a tracked-team game payload
+  - Sports UI now exposes per-game `Add` action to create calendar events when game start time is available

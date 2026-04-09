@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+from typing import Any
 from uuid import UUID
 
 import httpx
@@ -73,6 +74,48 @@ class CalendarService:
             raise ValueError("Failed to refresh Google access token")
         return decrypted
 
+    @staticmethod
+    def _parse_google_datetime(raw: str | None) -> datetime | None:
+        if not raw:
+            return None
+        try:
+            dt = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+            if dt.tzinfo is None:
+                return dt.replace(tzinfo=timezone.utc)
+            return dt
+        except Exception:
+            return None
+
+    def _to_calendar_event(self, *, account: ConnectedAccount, item: dict[str, Any]) -> CalendarEvent | None:
+        start = item.get("start") or {}
+        end = item.get("end") or {}
+        start_raw = start.get("dateTime") or start.get("date")
+        end_raw = end.get("dateTime") or end.get("date")
+        start_dt = self._parse_google_datetime(start_raw)
+        end_dt = self._parse_google_datetime(end_raw)
+        if start_dt is None or end_dt is None:
+            return None
+
+        attendees = []
+        for attendee in item.get("attendees") or []:
+            email = attendee.get("email")
+            if isinstance(email, str) and email.strip():
+                attendees.append(email.strip())
+
+        return CalendarEvent(
+            account_id=account.id,
+            provider="google",
+            event_id=str(item.get("id") or ""),
+            title=str(item.get("summary") or "(untitled event)"),
+            description=item.get("description"),
+            location=item.get("location"),
+            start_at=start_dt,
+            end_at=end_dt,
+            attendees=attendees,
+            organizer=(item.get("organizer") or {}).get("email"),
+            is_all_day=bool(start.get("date") and not start.get("dateTime")),
+        )
+
     async def list_events(
         self,
         *,
@@ -102,42 +145,76 @@ class CalendarService:
                 data = resp.json()
 
             for item in data.get("items", []):
-                start = item.get("start") or {}
-                end = item.get("end") or {}
-                start_raw = start.get("dateTime") or start.get("date")
-                end_raw = end.get("dateTime") or end.get("date")
-                if not start_raw or not end_raw:
+                if not isinstance(item, dict):
                     continue
-                try:
-                    start_dt = datetime.fromisoformat(start_raw.replace("Z", "+00:00"))
-                    end_dt = datetime.fromisoformat(end_raw.replace("Z", "+00:00"))
-                except Exception:
-                    continue
-
-                attendees = []
-                for attendee in item.get("attendees") or []:
-                    email = attendee.get("email")
-                    if isinstance(email, str) and email.strip():
-                        attendees.append(email.strip())
-
-                events.append(
-                    CalendarEvent(
-                        account_id=account.id,
-                        provider="google",
-                        event_id=str(item.get("id") or ""),
-                        title=str(item.get("summary") or "(untitled event)"),
-                        description=item.get("description"),
-                        location=item.get("location"),
-                        start_at=start_dt,
-                        end_at=end_dt,
-                        attendees=attendees,
-                        organizer=(item.get("organizer") or {}).get("email"),
-                        is_all_day=bool(start.get("date") and not start.get("dateTime")),
-                    )
-                )
+                normalized = self._to_calendar_event(account=account, item=item)
+                if normalized is not None:
+                    events.append(normalized)
 
         events.sort(key=lambda e: e.start_at)
         return events
+
+    async def create_event(
+        self,
+        *,
+        user_id: UUID,
+        account_id: UUID | None,
+        title: str,
+        start_at: datetime,
+        end_at: datetime,
+        description: str | None = None,
+        location: str | None = None,
+        attendees: list[str] | None = None,
+        is_all_day: bool = False,
+    ) -> CalendarEvent:
+        if end_at <= start_at:
+            raise ValueError("Event end_at must be after start_at.")
+
+        account = next(iter(self._list_accounts(user_id=user_id, account_id=account_id)), None)
+        if account is None:
+            raise ValueError("No Google Calendar account connected with calendar scope.")
+
+        token = await self._ensure_valid_token(account)
+        attendees_payload = [
+            {"email": email.strip()}
+            for email in (attendees or [])
+            if isinstance(email, str) and email.strip()
+        ]
+
+        payload: dict[str, Any] = {
+            "summary": title.strip(),
+            "description": description.strip() if isinstance(description, str) and description.strip() else None,
+            "location": location.strip() if isinstance(location, str) and location.strip() else None,
+            "attendees": attendees_payload,
+        }
+        payload = {key: value for key, value in payload.items() if value not in (None, [], "")}
+
+        if is_all_day:
+            start_date = start_at.astimezone(timezone.utc).date()
+            end_date = end_at.astimezone(timezone.utc).date()
+            if end_date <= start_date:
+                end_date = start_date + timedelta(days=1)
+            payload["start"] = {"date": start_date.isoformat()}
+            payload["end"] = {"date": end_date.isoformat()}
+        else:
+            payload["start"] = {"dateTime": start_at.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")}
+            payload["end"] = {"dateTime": end_at.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")}
+
+        async with httpx.AsyncClient(timeout=20) as client:
+            resp = await client.post(
+                f"{GOOGLE_CALENDAR_BASE}/calendars/primary/events",
+                headers={"Authorization": f"Bearer {token}"},
+                json=payload,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+
+        if not isinstance(data, dict):
+            raise ValueError("Google Calendar returned an invalid event response.")
+        event = self._to_calendar_event(account=account, item=data)
+        if event is None:
+            raise ValueError("Failed to parse created calendar event.")
+        return event
 
     async def freebusy(
         self,

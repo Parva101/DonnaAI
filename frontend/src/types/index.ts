@@ -162,6 +162,33 @@ export type InboxConversationListResponse = {
   platform_counts: InboxPlatformCount[];
 };
 
+export type ChatIngestionFailure = {
+  conversation_id: string;
+  error: string;
+};
+
+export type ChatIngestionPlatformResult = {
+  platform: string;
+  conversations_discovered: number;
+  conversations_synced: number;
+  messages_synced: number;
+  failures: ChatIngestionFailure[];
+};
+
+export type ChatIngestionTotals = {
+  conversations_discovered: number;
+  conversations_synced: number;
+  messages_synced: number;
+  failed_conversations: number;
+};
+
+export type ChatIngestionSyncResponse = {
+  status: string;
+  platform: string;
+  totals: ChatIngestionTotals;
+  results: ChatIngestionPlatformResult[];
+};
+
 export type SpotifyArtist = {
   name: string;
 };
@@ -350,6 +377,11 @@ export type SportsGameListResponse = {
   total: number;
 };
 
+export type SportsCalendarEventCreateResponse = {
+  status: string;
+  event: CalendarEvent;
+};
+
 export type WhatsAppStatus = {
   running: boolean;
   pid: number | null;
@@ -393,6 +425,19 @@ export type WhatsAppConversationMessage = {
 export type WhatsAppConversationMessagesResponse = {
   messages: WhatsAppConversationMessage[];
   total: number;
+};
+
+export type WhatsAppSyncFailure = {
+  conversation_id: string;
+  error: string;
+};
+
+export type WhatsAppSyncResponse = {
+  status: string;
+  conversations_discovered: number;
+  conversations_synced: number;
+  messages_synced: number;
+  failures: WhatsAppSyncFailure[];
 };
 
 export type SlackConversationSummary = {
@@ -495,6 +540,10 @@ export type CalendarEvent = {
 export type CalendarEventListResponse = {
   events: CalendarEvent[];
   total: number;
+};
+
+export type CalendarEventCreateResponse = {
+  event: CalendarEvent;
 };
 
 export type BusyBlock = {

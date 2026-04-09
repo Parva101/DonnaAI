@@ -1,8 +1,9 @@
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
-import { CalendarClock, Loader2, Plus, RefreshCw, Search, Trash2, Trophy, Tv } from "lucide-react";
+import { CalendarClock, CalendarPlus, Loader2, Plus, RefreshCw, Search, Trash2, Trophy, Tv } from "lucide-react";
 import { format, formatDistanceToNow } from "date-fns";
 
 import {
+  addSportsGameToCalendar,
   ApiError,
   listSportsLeagues,
   listSportsLiveScores,
@@ -34,6 +35,8 @@ export function SportsPage() {
   const [gamesLoading, setGamesLoading] = useState(false);
   const [searching, setSearching] = useState(false);
   const [savingTeamKey, setSavingTeamKey] = useState<string | null>(null);
+  const [calendarSavingGameId, setCalendarSavingGameId] = useState<string | null>(null);
+  const [calendarMessage, setCalendarMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const [searchText, setSearchText] = useState("");
@@ -125,6 +128,7 @@ export function SportsPage() {
     const key = `${team.league}:${team.team_id}`;
     setSavingTeamKey(key);
     setError(null);
+    setCalendarMessage(null);
     try {
       await trackSportsTeam({
         league: team.league,
@@ -146,6 +150,7 @@ export function SportsPage() {
   const onUntrackTeam = async (team: SportsTrackedTeam) => {
     setSavingTeamKey(team.id);
     setError(null);
+    setCalendarMessage(null);
     try {
       await untrackSportsTeam(team.id);
       await loadTrackedTeams();
@@ -154,6 +159,37 @@ export function SportsPage() {
       setError(message);
     } finally {
       setSavingTeamKey(null);
+    }
+  };
+
+  const onAddGameToCalendar = async (game: SportsGame) => {
+    if (!game.start_time) {
+      setError("Cannot add this game to calendar because its start time is not available yet.");
+      return;
+    }
+
+    setCalendarSavingGameId(game.game_id);
+    setError(null);
+    setCalendarMessage(null);
+    try {
+      const result = await addSportsGameToCalendar({
+        game_id: game.game_id,
+        league: game.league,
+        league_label: game.league_label,
+        start_time: game.start_time,
+        status: game.status,
+        status_detail: game.status_detail,
+        venue: game.venue,
+        broadcast: game.broadcast,
+        home: game.home,
+        away: game.away,
+      });
+      setCalendarMessage(`Added "${result.event.title}" to calendar.`);
+    } catch (err) {
+      const message = err instanceof ApiError ? err.message : "Failed to add game to calendar.";
+      setError(message);
+    } finally {
+      setCalendarSavingGameId(null);
     }
   };
 
@@ -182,6 +218,11 @@ export function SportsPage() {
       {error && (
         <div className="rounded-xl border border-destructive/30 bg-destructive/[0.08] px-4 py-3 text-sm text-destructive">
           {error}
+        </div>
+      )}
+      {calendarMessage && (
+        <div className="rounded-xl border border-primary/30 bg-primary/[0.08] px-4 py-3 text-sm text-primary">
+          {calendarMessage}
         </div>
       )}
 
@@ -268,7 +309,22 @@ export function SportsPage() {
                           {game.status}
                         </span>
                       </div>
-                      <span className="text-xs text-muted-foreground">{formatGameTime(game)}</span>
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs text-muted-foreground">{formatGameTime(game)}</span>
+                        <button
+                          onClick={() => void onAddGameToCalendar(game)}
+                          disabled={!game.start_time || calendarSavingGameId === game.game_id}
+                          className="inline-flex items-center gap-1 rounded-md border border-border px-2 py-1 text-[11px] text-foreground hover:bg-secondary disabled:opacity-60"
+                          title={game.start_time ? "Add game to calendar" : "Start time required"}
+                        >
+                          {calendarSavingGameId === game.game_id ? (
+                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                          ) : (
+                            <CalendarPlus className="h-3.5 w-3.5" />
+                          )}
+                          Add
+                        </button>
+                      </div>
                     </div>
 
                     {[game.away, game.home].map((team) => (

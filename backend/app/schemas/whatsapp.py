@@ -59,3 +59,24 @@ class WhatsAppConversationMessage(BaseModel):
 class WhatsAppConversationMessagesResponse(BaseModel):
     messages: list[WhatsAppConversationMessage]
     total: int
+
+
+class WhatsAppSyncRequest(BaseModel):
+    account_id: UUID | None = None
+    unread_only: bool = False
+    search: str | None = None
+    conversation_limit: int = Field(default=200, ge=1, le=5000)
+    message_limit: int = Field(default=200, ge=1, le=2000)
+
+
+class WhatsAppSyncFailure(BaseModel):
+    conversation_id: str
+    error: str
+
+
+class WhatsAppSyncResponse(BaseModel):
+    status: str
+    conversations_discovered: int
+    conversations_synced: int
+    messages_synced: int
+    failures: list[WhatsAppSyncFailure] = Field(default_factory=list)

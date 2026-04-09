@@ -11,6 +11,7 @@ from fastapi.testclient import TestClient
 from app.core.db import get_db
 from app.main import fastapi_app
 from app.models import ConnectedAccount
+from app.services.chat_sync_service import ChatSyncService
 from app.services.whatsapp_service import WhatsAppService
 
 
@@ -160,4 +161,56 @@ def test_send_whatsapp_message_rejects_invalid_target(
         f"/api/v1/whatsapp/send?account_id={account.id}",
         json={"to": "invalid@domain.com", "text": "Hello"},
     )
+    assert resp.status_code == 400
+
+
+def test_whatsapp_sync_mocked(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    user = _login(client)
+    account = _seed_whatsapp_account(client, user["id"])
+
+    def fake_sync(
+        self,
+        *,
+        user_id,
+        account_id,
+        conversation_limit,
+        message_limit,
+        unread_only=False,
+        search=None,
+    ):
+        assert account_id == account.id
+        assert conversation_limit == 25
+        assert message_limit == 50
+        assert unread_only is True
+        assert search == "billing"
+        return {
+            "platform": "whatsapp",
+            "conversations_discovered": 3,
+            "conversations_synced": 3,
+            "messages_synced": 17,
+            "failures": [],
+        }
+
+    monkeypatch.setattr(ChatSyncService, "sync_whatsapp_ingestion", fake_sync)
+
+    resp = client.post(
+        "/api/v1/whatsapp/sync",
+        json={
+            "account_id": str(account.id),
+            "conversation_limit": 25,
+            "message_limit": 50,
+            "unread_only": True,
+            "search": "billing",
+        },
+    )
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert payload["status"] == "ok"
+    assert payload["conversations_discovered"] == 3
+    assert payload["messages_synced"] == 17
+
+
+def test_whatsapp_sync_requires_connected_account(client: TestClient) -> None:
+    _login(client)
+    resp = client.post("/api/v1/whatsapp/sync", json={})
     assert resp.status_code == 400

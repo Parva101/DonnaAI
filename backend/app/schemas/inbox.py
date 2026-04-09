@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from uuid import UUID
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class InboxConversationSummary(BaseModel):
@@ -33,3 +33,39 @@ class InboxConversationListResponse(BaseModel):
     conversations: list[InboxConversationSummary]
     total: int
     platform_counts: list[InboxPlatformCount]
+
+
+class ChatIngestionFailure(BaseModel):
+    conversation_id: str
+    error: str
+
+
+class ChatIngestionPlatformResult(BaseModel):
+    platform: str
+    conversations_discovered: int
+    conversations_synced: int
+    messages_synced: int
+    failures: list[ChatIngestionFailure] = Field(default_factory=list)
+
+
+class ChatIngestionTotals(BaseModel):
+    conversations_discovered: int
+    conversations_synced: int
+    messages_synced: int
+    failed_conversations: int
+
+
+class ChatIngestionSyncRequest(BaseModel):
+    platform: str = Field(default="all", min_length=3, max_length=24)
+    account_id: UUID | None = None
+    unread_only: bool = False
+    search: str | None = None
+    conversation_limit: int = Field(default=200, ge=1, le=5000)
+    message_limit: int = Field(default=200, ge=1, le=2000)
+
+
+class ChatIngestionSyncResponse(BaseModel):
+    status: str
+    platform: str
+    totals: ChatIngestionTotals
+    results: list[ChatIngestionPlatformResult]

@@ -67,3 +67,77 @@ def test_suggest_slots_mocked(client: TestClient, monkeypatch: pytest.MonkeyPatc
     assert resp.status_code == 200
     payload = resp.json()
     assert len(payload["slots"]) == 1
+
+
+def test_create_calendar_event_mocked(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    _login(client)
+    start = datetime(2026, 4, 10, 15, 0, tzinfo=timezone.utc)
+    end = start + timedelta(minutes=45)
+
+    async def fake_create_event(
+        self,
+        *,
+        user_id,
+        account_id=None,
+        title,
+        start_at,
+        end_at,
+        description=None,
+        location=None,
+        attendees=None,
+        is_all_day=False,
+    ):
+        assert title == "Donna Sync"
+        assert start_at == start
+        assert end_at == end
+        assert description == "Cross-platform review"
+        assert location == "Meet"
+        assert attendees == ["owner@example.com"]
+        assert is_all_day is False
+        return {
+            "account_id": "8a9deef6-9f6f-43ba-af6a-35a8d4d9a2db",
+            "provider": "google",
+            "event_id": "evt-created-1",
+            "title": title,
+            "description": description,
+            "location": location,
+            "start_at": start_at,
+            "end_at": end_at,
+            "attendees": attendees or [],
+            "organizer": "owner@example.com",
+            "is_all_day": False,
+        }
+
+    monkeypatch.setattr(CalendarService, "create_event", fake_create_event)
+
+    resp = client.post(
+        "/api/v1/calendar/events",
+        json={
+            "title": "Donna Sync",
+            "description": "Cross-platform review",
+            "location": "Meet",
+            "start_at": start.isoformat(),
+            "end_at": end.isoformat(),
+            "attendees": ["owner@example.com"],
+            "is_all_day": False,
+        },
+    )
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert payload["event"]["event_id"] == "evt-created-1"
+    assert payload["event"]["title"] == "Donna Sync"
+
+
+def test_create_calendar_event_rejects_invalid_window(client: TestClient) -> None:
+    _login(client)
+    start = datetime(2026, 4, 10, 15, 0, tzinfo=timezone.utc)
+
+    resp = client.post(
+        "/api/v1/calendar/events",
+        json={
+            "title": "Invalid",
+            "start_at": start.isoformat(),
+            "end_at": start.isoformat(),
+        },
+    )
+    assert resp.status_code == 400

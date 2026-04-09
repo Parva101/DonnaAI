@@ -7,6 +7,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field
 
+from app.schemas.calendar import CalendarEvent
+
 
 class SportsLeagueRead(BaseModel):
     key: str
@@ -89,3 +91,24 @@ class SportsGameListResponse(BaseModel):
     generated_at: datetime
     games: list[SportsGameRead]
     total: int
+
+
+class SportsCalendarEventCreateRequest(BaseModel):
+    account_id: UUID | None = None
+    game_id: str = Field(min_length=1, max_length=128)
+    league: str = Field(min_length=1, max_length=32)
+    league_label: str = Field(min_length=1, max_length=80)
+    start_time: datetime
+    status: str = Field(min_length=1, max_length=120)
+    status_detail: str | None = Field(default=None, max_length=240)
+    venue: str | None = Field(default=None, max_length=240)
+    broadcast: str | None = Field(default=None, max_length=120)
+    home: SportsGameTeamRead
+    away: SportsGameTeamRead
+    title: str | None = Field(default=None, max_length=240)
+    duration_minutes: int = Field(default=180, ge=30, le=720)
+
+
+class SportsCalendarEventCreateResponse(BaseModel):
+    status: str
+    event: CalendarEvent

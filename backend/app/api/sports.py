@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -12,6 +12,8 @@ from app.api.dependencies import get_current_user
 from app.core.db import get_db
 from app.models import User
 from app.schemas.sports import (
+    SportsCalendarEventCreateRequest,
+    SportsCalendarEventCreateResponse,
     SportsGameListResponse,
     SportsLeagueListResponse,
     SportsTeamSearchResponse,
@@ -19,6 +21,7 @@ from app.schemas.sports import (
     SportsTrackedTeamRead,
     SportsTrackTeamRequest,
 )
+from app.services.calendar_service import CalendarService
 from app.services.sports_service import SportsService
 
 router = APIRouter(prefix="/sports", tags=["sports"])
@@ -142,3 +145,45 @@ async def list_live_scores(
         games=games,
         total=len(games),
     )
+
+
+@router.post("/calendar/events", response_model=SportsCalendarEventCreateResponse)
+async def add_sports_game_to_calendar(
+    payload: SportsCalendarEventCreateRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> SportsCalendarEventCreateResponse:
+    title = (payload.title or "").strip() or f"{payload.away.name} at {payload.home.name}"
+    start_at = payload.start_time
+    if start_at.tzinfo is None:
+        start_at = start_at.replace(tzinfo=timezone.utc)
+    end_at = start_at + timedelta(minutes=payload.duration_minutes)
+
+    details = [f"{payload.league_label} - {payload.status}"]
+    if payload.status_detail:
+        details.append(payload.status_detail)
+    if payload.broadcast:
+        details.append(f"Broadcast: {payload.broadcast}")
+    if payload.game_id:
+        details.append(f"DONNAAI_GAME_ID: {payload.game_id}")
+    description = "\n".join(details)
+
+    calendar = CalendarService(db)
+    try:
+        event = await calendar.create_event(
+            user_id=current_user.id,
+            account_id=payload.account_id,
+            title=title,
+            description=description,
+            location=payload.venue,
+            start_at=start_at,
+            end_at=end_at,
+            attendees=[],
+            is_all_day=False,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+    except Exception as exc:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"Sports calendar sync failed: {exc}")
+
+    return SportsCalendarEventCreateResponse(status="created", event=event)

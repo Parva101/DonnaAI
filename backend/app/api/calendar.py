@@ -13,6 +13,8 @@ from app.core.db import get_db
 from app.models import User
 from app.schemas.calendar import (
     CalendarEventListResponse,
+    CalendarEventCreateRequest,
+    CalendarEventCreateResponse,
     FreeBusyRequest,
     FreeBusyResponse,
     SuggestSlotsRequest,
@@ -51,6 +53,39 @@ async def list_calendar_events(
 
     sliced = events[:limit]
     return CalendarEventListResponse(events=sliced, total=len(events))
+
+
+@router.post("/events", response_model=CalendarEventCreateResponse)
+async def create_calendar_event(
+    payload: CalendarEventCreateRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> CalendarEventCreateResponse:
+    if payload.end_at <= payload.start_at:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Event end_at must be after start_at.",
+        )
+
+    svc = CalendarService(db)
+    try:
+        event = await svc.create_event(
+            user_id=current_user.id,
+            account_id=payload.account_id,
+            title=payload.title,
+            description=payload.description,
+            location=payload.location,
+            start_at=payload.start_at,
+            end_at=payload.end_at,
+            attendees=payload.attendees,
+            is_all_day=payload.is_all_day,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+    except Exception as exc:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"Calendar API failed: {exc}")
+
+    return CalendarEventCreateResponse(event=event)
 
 
 @router.post("/freebusy", response_model=FreeBusyResponse)

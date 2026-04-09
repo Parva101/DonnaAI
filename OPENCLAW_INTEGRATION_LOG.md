@@ -65,3 +65,12 @@ Previous OpenClaw gateway-based adapter work remains in git history and may serv
 - Improved WhatsApp outbound reliability:
   - target normalization (phone/JID handling)
   - provider message ID extraction + persistence into outbound action records
+
+## Latest Connector Update (2026-04-09)
+- Added explicit ingestion run APIs for deterministic sync execution:
+  - `POST /api/v1/inbox/sync/chats` (all/slack/teams/whatsapp)
+  - `POST /api/v1/whatsapp/sync`
+- Added calendar action support used by cross-platform automations:
+  - `POST /api/v1/calendar/events`
+  - `POST /api/v1/sports/calendar/events` to convert tracked sports games into calendar events
+- Sports frontend now includes per-game calendar action wiring (`Add`) for games with known start times.

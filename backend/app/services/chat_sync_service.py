@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timezone
+from typing import Any
 from uuid import UUID, uuid4
 
 from fastapi.encoders import jsonable_encoder
@@ -821,6 +822,213 @@ class ChatSyncService:
             )
             self.db.commit()
             raise
+
+    @staticmethod
+    def _clamp_limit(value: int, *, floor: int = 1, ceiling: int = 5000) -> int:
+        return max(floor, min(int(value), ceiling))
+
+    def sync_slack_ingestion(
+        self,
+        *,
+        user_id: UUID,
+        account_id: UUID | None,
+        conversation_limit: int,
+        message_limit: int,
+        unread_only: bool = False,
+        search: str | None = None,
+    ) -> dict[str, Any]:
+        conversation_limit = self._clamp_limit(conversation_limit, ceiling=2000)
+        message_limit = self._clamp_limit(message_limit, ceiling=1000)
+
+        conversations = self.list_slack_conversations(
+            user_id=user_id,
+            account_id=account_id,
+            unread_only=unread_only,
+            search=search,
+        )
+        selected = conversations[:conversation_limit]
+
+        messages_synced = 0
+        failures: list[dict[str, str]] = []
+        for conversation in selected:
+            try:
+                rows = self.list_slack_messages(
+                    user_id=user_id,
+                    account_id=account_id,
+                    conversation_id=conversation.conversation_id,
+                    limit=message_limit,
+                )
+                messages_synced += len(rows)
+            except Exception as exc:
+                failures.append(
+                    {
+                        "conversation_id": conversation.conversation_id,
+                        "error": str(exc),
+                    }
+                )
+
+        return {
+            "platform": "slack",
+            "conversations_discovered": len(conversations),
+            "conversations_synced": len(selected),
+            "messages_synced": messages_synced,
+            "failures": failures,
+        }
+
+    def sync_teams_ingestion(
+        self,
+        *,
+        user_id: UUID,
+        account_id: UUID | None,
+        conversation_limit: int,
+        message_limit: int,
+        unread_only: bool = False,
+        search: str | None = None,
+    ) -> dict[str, Any]:
+        conversation_limit = self._clamp_limit(conversation_limit, ceiling=2000)
+        message_limit = self._clamp_limit(message_limit, ceiling=1000)
+
+        conversations = self.list_teams_conversations(
+            user_id=user_id,
+            account_id=account_id,
+            unread_only=unread_only,
+            search=search,
+        )
+        selected = conversations[:conversation_limit]
+
+        messages_synced = 0
+        failures: list[dict[str, str]] = []
+        for conversation in selected:
+            try:
+                rows = self.list_teams_messages(
+                    user_id=user_id,
+                    account_id=account_id,
+                    conversation_id=conversation.conversation_id,
+                    limit=message_limit,
+                )
+                messages_synced += len(rows)
+            except Exception as exc:
+                failures.append(
+                    {
+                        "conversation_id": conversation.conversation_id,
+                        "error": str(exc),
+                    }
+                )
+
+        return {
+            "platform": "teams",
+            "conversations_discovered": len(conversations),
+            "conversations_synced": len(selected),
+            "messages_synced": messages_synced,
+            "failures": failures,
+        }
+
+    def sync_whatsapp_ingestion(
+        self,
+        *,
+        user_id: UUID,
+        account_id: UUID | None,
+        conversation_limit: int,
+        message_limit: int,
+        unread_only: bool = False,
+        search: str | None = None,
+    ) -> dict[str, Any]:
+        conversation_limit = self._clamp_limit(conversation_limit, ceiling=5000)
+        message_limit = self._clamp_limit(message_limit, ceiling=2000)
+
+        conversations = self.list_whatsapp_conversations(
+            user_id=user_id,
+            account_id=account_id,
+            unread_only=unread_only,
+            search=search,
+            limit=conversation_limit,
+        )
+        selected = conversations[:conversation_limit]
+
+        messages_synced = 0
+        failures: list[dict[str, str]] = []
+        for conversation in selected:
+            conversation_id = str(conversation.get("conversation_id") or "").strip()
+            if not conversation_id:
+                continue
+            try:
+                rows = self.list_whatsapp_messages(
+                    user_id=user_id,
+                    account_id=account_id,
+                    conversation_id=conversation_id,
+                    limit=message_limit,
+                )
+                messages_synced += len(rows)
+            except Exception as exc:
+                failures.append({"conversation_id": conversation_id, "error": str(exc)})
+
+        return {
+            "platform": "whatsapp",
+            "conversations_discovered": len(conversations),
+            "conversations_synced": len(selected),
+            "messages_synced": messages_synced,
+            "failures": failures,
+        }
+
+    def sync_ingestion(
+        self,
+        *,
+        user_id: UUID,
+        platform: str,
+        account_id: UUID | None,
+        conversation_limit: int = 200,
+        message_limit: int = 200,
+        unread_only: bool = False,
+        search: str | None = None,
+    ) -> dict[str, Any]:
+        normalized = (platform or "all").strip().lower() or "all"
+        if normalized not in {"all", "slack", "teams", "whatsapp"}:
+            raise ValueError("Unsupported sync platform. Use all, slack, teams, or whatsapp.")
+
+        targets = ["slack", "teams", "whatsapp"] if normalized == "all" else [normalized]
+        results: list[dict[str, Any]] = []
+        for target in targets:
+            if target == "slack":
+                result = self.sync_slack_ingestion(
+                    user_id=user_id,
+                    account_id=account_id,
+                    conversation_limit=conversation_limit,
+                    message_limit=message_limit,
+                    unread_only=unread_only,
+                    search=search,
+                )
+            elif target == "teams":
+                result = self.sync_teams_ingestion(
+                    user_id=user_id,
+                    account_id=account_id,
+                    conversation_limit=conversation_limit,
+                    message_limit=message_limit,
+                    unread_only=unread_only,
+                    search=search,
+                )
+            else:
+                result = self.sync_whatsapp_ingestion(
+                    user_id=user_id,
+                    account_id=account_id,
+                    conversation_limit=conversation_limit,
+                    message_limit=message_limit,
+                    unread_only=unread_only,
+                    search=search,
+                )
+            results.append(result)
+
+        totals = {
+            "conversations_discovered": sum(int(item.get("conversations_discovered") or 0) for item in results),
+            "conversations_synced": sum(int(item.get("conversations_synced") or 0) for item in results),
+            "messages_synced": sum(int(item.get("messages_synced") or 0) for item in results),
+            "failed_conversations": sum(len(item.get("failures") or []) for item in results),
+        }
+
+        return {
+            "platform": normalized,
+            "totals": totals,
+            "results": results,
+        }
 
 
 def _utcnow() -> datetime:

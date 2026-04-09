@@ -11,6 +11,7 @@ from fastapi.testclient import TestClient
 from app.core.db import get_db
 from app.main import fastapi_app
 from app.models import ConnectedAccount, Email
+from app.services.chat_sync_service import ChatSyncService
 
 
 def _auth_login(client: TestClient) -> dict:
@@ -151,6 +152,9 @@ def test_list_inbox_conversations_requires_auth(client: TestClient):
     resp = client.get("/api/v1/inbox/conversations")
     assert resp.status_code == 401
 
+    sync_resp = client.post("/api/v1/inbox/sync/chats", json={})
+    assert sync_resp.status_code == 401
+
 
 def test_list_inbox_conversations_grouped(client_with_threaded_emails):
     resp = client_with_threaded_emails.get("/api/v1/inbox/conversations")
@@ -197,3 +201,65 @@ def test_list_inbox_conversations_unsupported_platform(client_with_threaded_emai
     assert data["total"] == 0
     assert data["conversations"] == []
     assert data["platform_counts"] == [{"platform": "gmail", "total": 3, "unread": 2}]
+
+
+def test_sync_chat_ingestion_mocked(authed_client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    def fake_sync(
+        self,
+        *,
+        user_id,
+        platform,
+        account_id=None,
+        conversation_limit=200,
+        message_limit=200,
+        unread_only=False,
+        search=None,
+    ):
+        assert platform == "all"
+        assert conversation_limit == 40
+        assert message_limit == 60
+        assert unread_only is True
+        assert search == "urgent"
+        return {
+            "platform": "all",
+            "totals": {
+                "conversations_discovered": 12,
+                "conversations_synced": 10,
+                "messages_synced": 140,
+                "failed_conversations": 1,
+            },
+            "results": [
+                {
+                    "platform": "slack",
+                    "conversations_discovered": 4,
+                    "conversations_synced": 4,
+                    "messages_synced": 70,
+                    "failures": [],
+                }
+            ],
+        }
+
+    monkeypatch.setattr(ChatSyncService, "sync_ingestion", fake_sync)
+    resp = authed_client.post(
+        "/api/v1/inbox/sync/chats",
+        json={
+            "platform": "all",
+            "conversation_limit": 40,
+            "message_limit": 60,
+            "unread_only": True,
+            "search": "urgent",
+        },
+    )
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert payload["status"] == "ok"
+    assert payload["totals"]["messages_synced"] == 140
+    assert payload["results"][0]["platform"] == "slack"
+
+
+def test_sync_chat_ingestion_rejects_unsupported_platform(authed_client: TestClient) -> None:
+    resp = authed_client.post(
+        "/api/v1/inbox/sync/chats",
+        json={"platform": "discord"},
+    )
+    assert resp.status_code == 400

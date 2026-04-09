@@ -25,6 +25,21 @@ class CalendarEventListResponse(BaseModel):
     total: int
 
 
+class CalendarEventCreateRequest(BaseModel):
+    account_id: UUID | None = None
+    title: str = Field(min_length=1, max_length=240)
+    description: str | None = None
+    location: str | None = None
+    start_at: datetime
+    end_at: datetime
+    attendees: list[str] = Field(default_factory=list)
+    is_all_day: bool = False
+
+
+class CalendarEventCreateResponse(BaseModel):
+    event: CalendarEvent
+
+
 class FreeBusyRequest(BaseModel):
     account_id: UUID | None = None
     start_at: datetime

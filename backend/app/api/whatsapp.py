@@ -18,6 +18,8 @@ from app.schemas.whatsapp import (
     WhatsAppConversationSummary,
     WhatsAppSendRequest,
     WhatsAppSendResponse,
+    WhatsAppSyncRequest,
+    WhatsAppSyncResponse,
     WhatsAppStatusResponse,
 )
 from app.services.chat_sync_service import ChatSyncService
@@ -164,4 +166,48 @@ def whatsapp_send(
         status="sent",
         to=str(result.get("to") or payload.to),
         message_id=(str(result.get("message_id")) if result.get("message_id") else None),
+    )
+
+
+@router.post("/sync", response_model=WhatsAppSyncResponse)
+def whatsapp_sync(
+    payload: WhatsAppSyncRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> WhatsAppSyncResponse:
+    account = _get_whatsapp_account(
+        db=db,
+        user=current_user,
+        account_id=payload.account_id,
+    )
+    if account is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No WhatsApp account connected.",
+        )
+
+    sync = ChatSyncService(db)
+    try:
+        result = sync.sync_whatsapp_ingestion(
+            user_id=current_user.id,
+            account_id=account.id,
+            unread_only=payload.unread_only,
+            search=payload.search,
+            conversation_limit=payload.conversation_limit,
+            message_limit=payload.message_limit,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"WhatsApp API failed: {exc}",
+        )
+
+    return WhatsAppSyncResponse(
+        status="ok",
+        conversations_discovered=int(result.get("conversations_discovered") or 0),
+        conversations_synced=int(result.get("conversations_synced") or 0),
+        messages_synced=int(result.get("messages_synced") or 0),
+        failures=result.get("failures") or [],
     )

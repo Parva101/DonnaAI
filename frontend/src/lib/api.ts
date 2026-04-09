@@ -2,7 +2,9 @@ import type {
   ActionItem,
   ActionItemExtractResponse,
   ActionItemListResponse,
+  CalendarEventCreateResponse,
   CalendarEventListResponse,
+  ChatIngestionSyncResponse,
   User,
   SessionResponse,
   ConnectedAccount,
@@ -21,6 +23,7 @@ import type {
   NewsSourceListResponse,
   NotificationPreferencesResponse,
   SportsGameListResponse,
+  SportsCalendarEventCreateResponse,
   SportsLeagueListResponse,
   SportsTeamSearchResponse,
   SportsTrackedTeam,
@@ -33,6 +36,7 @@ import type {
   SpotifyTransferSummary,
   WhatsAppConversationListResponse,
   WhatsAppConversationMessagesResponse,
+  WhatsAppSyncResponse,
   WhatsAppStatus,
   TeamsConversationListResponse,
   TeamsMessageListResponse,
@@ -222,6 +226,20 @@ export function listInboxConversations(params?: {
   return request<InboxConversationListResponse>(`/inbox/conversations${query ? `?${query}` : ""}`);
 }
 
+export function syncInboxChats(payload: {
+  platform?: string;
+  account_id?: string;
+  unread_only?: boolean;
+  search?: string;
+  conversation_limit?: number;
+  message_limit?: number;
+}): Promise<ChatIngestionSyncResponse> {
+  return request<ChatIngestionSyncResponse>("/inbox/sync/chats", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
 export function listSportsLeagues(): Promise<SportsLeagueListResponse> {
   return request<SportsLeagueListResponse>("/sports/leagues");
 }
@@ -274,6 +292,47 @@ export function listSportsLiveScores(params?: {
   return request<SportsGameListResponse>(`/sports/scores/live${query ? `?${query}` : ""}`);
 }
 
+export function addSportsGameToCalendar(payload: {
+  account_id?: string;
+  game_id: string;
+  league: string;
+  league_label: string;
+  start_time: string;
+  status: string;
+  status_detail?: string | null;
+  venue?: string | null;
+  broadcast?: string | null;
+  title?: string | null;
+  duration_minutes?: number;
+  home: {
+    team_id: string;
+    name: string;
+    abbreviation?: string | null;
+    logo_url?: string | null;
+    home_away: string;
+    score?: number | null;
+    winner?: boolean | null;
+    record?: string | null;
+    tracked: boolean;
+  };
+  away: {
+    team_id: string;
+    name: string;
+    abbreviation?: string | null;
+    logo_url?: string | null;
+    home_away: string;
+    score?: number | null;
+    winner?: boolean | null;
+    record?: string | null;
+    tracked: boolean;
+  };
+}): Promise<SportsCalendarEventCreateResponse> {
+  return request<SportsCalendarEventCreateResponse>("/sports/calendar/events", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
 // —— News ————————————————————————————————————————————————————————————————
 export function listNewsArticles(params?: {
   topic?: string;
@@ -321,10 +380,26 @@ export function listWhatsAppMessages(
 export function sendWhatsAppMessage(payload: {
   to: string;
   text: string;
+  account_id?: string;
 }): Promise<{ status: string }> {
-  return request<{ status: string }>("/whatsapp/send", {
+  const qs = payload.account_id ? `?account_id=${encodeURIComponent(payload.account_id)}` : "";
+  const { account_id, ...rest } = payload;
+  return request<{ status: string }>(`/whatsapp/send${qs}`, {
     method: "POST",
-    body: JSON.stringify(payload),
+    body: JSON.stringify(rest),
+  });
+}
+
+export function syncWhatsAppIngestion(payload?: {
+  account_id?: string;
+  unread_only?: boolean;
+  search?: string;
+  conversation_limit?: number;
+  message_limit?: number;
+}): Promise<WhatsAppSyncResponse> {
+  return request<WhatsAppSyncResponse>("/whatsapp/sync", {
+    method: "POST",
+    body: JSON.stringify(payload ?? {}),
   });
 }
 
@@ -420,6 +495,22 @@ export function listCalendarEvents(params?: {
   if (params?.limit) qs.set("limit", String(params.limit));
   const query = qs.toString();
   return request<CalendarEventListResponse>(`/calendar/events${query ? `?${query}` : ""}`);
+}
+
+export function createCalendarEvent(payload: {
+  account_id?: string;
+  title: string;
+  description?: string | null;
+  location?: string | null;
+  start_at: string;
+  end_at: string;
+  attendees?: string[];
+  is_all_day?: boolean;
+}): Promise<CalendarEventCreateResponse> {
+  return request<CalendarEventCreateResponse>("/calendar/events", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
 }
 
 export function suggestCalendarSlots(payload: {

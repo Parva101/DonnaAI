@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 import pytest
 from fastapi.testclient import TestClient
 
+from app.services.calendar_service import CalendarService
 from app.services.sports_service import SportsService
 
 
@@ -164,3 +165,80 @@ def test_untrack_missing_team_returns_404(client: TestClient) -> None:
     missing = uuid.uuid4()
     resp = client.delete(f"/api/v1/sports/teams/tracked/{missing}")
     assert resp.status_code == 404
+
+
+def test_add_sports_game_to_calendar_mocked(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    _login(client)
+
+    async def fake_create_event(
+        self,
+        *,
+        user_id,
+        account_id=None,
+        title,
+        start_at,
+        end_at,
+        description=None,
+        location=None,
+        attendees=None,
+        is_all_day=False,
+    ):
+        assert title == "Los Angeles Lakers at Phoenix Suns"
+        assert location == "Footprint Center"
+        assert "NBA - In Progress" in (description or "")
+        assert is_all_day is False
+        return {
+            "account_id": "8a9deef6-9f6f-43ba-af6a-35a8d4d9a2db",
+            "provider": "google",
+            "event_id": "sports-evt-1",
+            "title": title,
+            "description": description,
+            "location": location,
+            "start_at": start_at,
+            "end_at": end_at,
+            "attendees": [],
+            "organizer": "owner@example.com",
+            "is_all_day": False,
+        }
+
+    monkeypatch.setattr(CalendarService, "create_event", fake_create_event)
+
+    resp = client.post(
+        "/api/v1/sports/calendar/events",
+        json={
+            "game_id": "401999999",
+            "league": "nba",
+            "league_label": "NBA",
+            "start_time": "2026-04-09T02:00:00Z",
+            "status": "In Progress",
+            "status_detail": "Q3 05:11",
+            "venue": "Footprint Center",
+            "broadcast": "ESPN",
+            "home": {
+                "team_id": "21",
+                "name": "Phoenix Suns",
+                "abbreviation": "PHX",
+                "logo_url": None,
+                "home_away": "home",
+                "score": 89,
+                "winner": None,
+                "record": "44-30",
+                "tracked": True,
+            },
+            "away": {
+                "team_id": "13",
+                "name": "Los Angeles Lakers",
+                "abbreviation": "LAL",
+                "logo_url": None,
+                "home_away": "away",
+                "score": 84,
+                "winner": None,
+                "record": "42-32",
+                "tracked": False,
+            },
+        },
+    )
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert payload["status"] == "created"
+    assert payload["event"]["event_id"] == "sports-evt-1"
