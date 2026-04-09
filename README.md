@@ -1,105 +1,50 @@
 # DonnaAI
 
-DonnaAI is a unified personal assistant dashboard that combines:
-- Multi-account Gmail sync + AI categorization
-- Unified inbox across Gmail, Slack, WhatsApp, and Teams
-- Calendar events and slot suggestions
-- AI productivity tools (reply suggestions, priority scoring, action items, semantic search)
-- Voice call workflow scaffolding (LiveKit + Twilio ready)
-- Spotify playback controls and account-to-account library transfer
-- News ingestion (RSS, NewsAPI, Hacker News) with bookmarks and daily briefing
+DonnaAI is being rebuilt as a personal operations layer on top of OpenClaw.
 
-## Quick Start (Docker Compose)
+Core goals:
+- Unify user-selected messages, email, and calendar context in one place.
+- Enable trustworthy cross-platform search, summaries, and actions.
+- Support safe cross-platform execution (with approvals and audit logs).
+- Add voice workflows after core data/action reliability is proven.
 
-### 1) Configure env
+## Branch Strategy
 
-Copy and edit:
+- `dev`: existing/legacy implementation (kept intact).
+- `main`: reset foundation for the new DonnaAI direction.
 
-```powershell
-copy backend\.env.example backend\.env
-copy frontend\.env.example frontend\.env
+## Current Status
+
+This branch is intentionally reset to a clean baseline so the new architecture can be built without carrying forward mismatched code.
+
+Planned first build phases:
+1. Ingestion foundation (forward-only, consent-gated).
+2. Unified retrieval and context packets.
+3. Approval-gated action execution.
+4. Voice orchestration on top of stable action/data layers.
+
+## Planned Repository Layout
+
+```text
+apps/        # dashboard and future client apps
+services/    # ingest, retrieval, action workers
+packages/    # shared contracts, domain models, connector adapters
+infra/       # deployment and infrastructure definitions
+scripts/     # local ops and automation scripts
+tests/       # integration and end-to-end tests
 ```
 
-### 2) Start full stack
+## Security and Public Repo Policy
 
-```powershell
-docker compose up -d --build
-```
+This repository is public. Do not commit:
+- `.env` files and secrets
+- credentials, keys, tokens
+- private docs/notes
+- local databases, dumps, cookies, runtime artifacts
 
-Services:
-- Frontend: `http://localhost:5173`
-- Backend: `http://localhost:8010`
-- API docs: `http://localhost:8010/docs`
-- Postgres: `localhost:5433`
-- Redis: `localhost:6379`
+The `.gitignore` in this branch is hardened for these defaults.
 
-Optional WhatsApp bridge container:
+## Next Step
 
-```powershell
-docker compose --profile whatsapp up -d --build
-```
-
-## GCP Deployment (Compute Engine)
-
-Use the GCP override compose profile:
-
-```bash
-docker compose -f docker-compose.yml -f docker-compose.gcp.yml up -d --build
-```
-
-This runs:
-- Frontend on `http://<VM_PUBLIC_IP>/` (port 80, via Nginx)
-- Backend on `http://<VM_PUBLIC_IP>:8010` (optional direct access)
-- API and WebSocket proxied under same origin (`/api/*`, `/ws/*`)
-
-Full instructions:
-- `docs/GCP_DEPLOYMENT.md`
-- VM bootstrap script: `scripts/gcp/bootstrap_vm.sh`
-
-## Quick Start (Manual Local)
-
-### Backend
-
-```powershell
-cd backend
-..\.venv\Scripts\python -m pip install -e .[dev]
-..\.venv\Scripts\alembic upgrade head
-..\.venv\Scripts\uvicorn app.main:app --reload --host 0.0.0.0 --port 8010
-```
-
-### Celery worker + beat
-
-```powershell
-cd backend
-..\.venv\Scripts\celery.exe -A app.core.celery_app worker --loglevel=info --pool=solo
-..\.venv\Scripts\celery.exe -A app.core.celery_app beat --loglevel=info
-```
-
-### Frontend
-
-```powershell
-cd frontend
-npm install
-npm run dev
-```
-
-## Implemented API Areas
-
-- `/api/v1/emails/*`
-- `/api/v1/inbox/*`
-- `/api/v1/slack/*`, `/api/v1/auth/slack/*`
-- `/api/v1/whatsapp/*`, `/api/v1/auth/whatsapp/*`
-- `/api/v1/teams/*`, `/api/v1/auth/teams/*`
-- `/api/v1/calendar/*`
-- `/api/v1/ai/*`
-- `/api/v1/notifications/*`
-- `/api/v1/voice/*`
-- `/api/v1/spotify/*`, `/api/v1/auth/spotify/*`
-- `/api/v1/news/*`
-- `/api/v1/webhooks/*` (gmail/slack/teams)
-
-## Notes
-
-- Active email provider in scope is Gmail.
-- Outlook/IMAP/SMTP are intentionally deferred.
-- Connected account tokens are stored encrypted at rest via application-level token crypto helpers.
+Scaffold the new codebase (services, API contracts, DB schema v1) and implement the first vertical slice:
+- ingest -> store -> retrieve -> approval -> execute -> audit
