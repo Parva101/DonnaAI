@@ -10,6 +10,7 @@ import httpx
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
+from app.core.token_crypto import decrypt_token, encrypt_token
 from app.models import ConnectedAccount
 
 
@@ -291,7 +292,7 @@ class SpotifyService:
         raise SpotifyAPIError(status_code=status_code, message=message)
 
     async def _ensure_access_token(self) -> str:
-        access_token = self.account.access_token_encrypted
+        access_token = decrypt_token(self.account.access_token_encrypted)
         if not access_token:
             return await self._refresh_access_token()
 
@@ -310,7 +311,7 @@ class SpotifyService:
         return access_token
 
     async def _refresh_access_token(self) -> str:
-        refresh_token = self.account.refresh_token_encrypted
+        refresh_token = decrypt_token(self.account.refresh_token_encrypted)
         if not refresh_token:
             raise ValueError("Spotify refresh token missing. Reconnect Spotify.")
 
@@ -332,9 +333,9 @@ class SpotifyService:
             response.raise_for_status()
             data = response.json()
 
-        self.account.access_token_encrypted = data["access_token"]
+        self.account.access_token_encrypted = encrypt_token(data["access_token"])
         if data.get("refresh_token"):
-            self.account.refresh_token_encrypted = data["refresh_token"]
+            self.account.refresh_token_encrypted = encrypt_token(data["refresh_token"])
         if "expires_in" in data:
             self.account.token_expires_at = datetime.now(timezone.utc) + timedelta(
                 seconds=int(data["expires_in"])
@@ -346,4 +347,4 @@ class SpotifyService:
         self.db.commit()
         self.db.refresh(self.account)
 
-        return self.account.access_token_encrypted or ""
+        return decrypt_token(self.account.access_token_encrypted) or ""

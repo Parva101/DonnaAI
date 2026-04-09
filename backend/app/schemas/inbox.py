@@ -10,7 +10,7 @@ class InboxConversationSummary(BaseModel):
     conversation_id: str
     platform: str
     account_id: UUID
-    latest_email_id: UUID
+    latest_email_id: str | None = None
     sender: str
     sender_address: str | None
     subject: str | None

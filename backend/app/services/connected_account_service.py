@@ -5,6 +5,7 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.core.token_crypto import encrypt_token
 from app.models import ConnectedAccount, User
 from app.schemas.connected_account import ConnectedAccountCreate, ConnectedAccountUpdate
 
@@ -44,8 +45,8 @@ class ConnectedAccountService:
             provider=payload.provider,
             provider_account_id=payload.provider_account_id,
             account_email=payload.account_email,
-            access_token_encrypted=payload.access_token_encrypted,
-            refresh_token_encrypted=payload.refresh_token_encrypted,
+            access_token_encrypted=encrypt_token(payload.access_token_encrypted),
+            refresh_token_encrypted=encrypt_token(payload.refresh_token_encrypted),
             token_expires_at=payload.token_expires_at,
             scopes=payload.scopes,
             account_metadata=payload.account_metadata,
@@ -59,6 +60,10 @@ class ConnectedAccountService:
         self, account: ConnectedAccount, payload: ConnectedAccountUpdate
     ) -> ConnectedAccount:
         update_data = payload.model_dump(exclude_unset=True)
+        if "access_token_encrypted" in update_data:
+            update_data["access_token_encrypted"] = encrypt_token(update_data["access_token_encrypted"])
+        if "refresh_token_encrypted" in update_data:
+            update_data["refresh_token_encrypted"] = encrypt_token(update_data["refresh_token_encrypted"])
         for field, value in update_data.items():
             setattr(account, field, value)
         self.db.add(account)

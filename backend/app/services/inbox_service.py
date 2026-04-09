@@ -1,19 +1,30 @@
-"""Unified inbox service built from Gmail email threads."""
+"""Unified inbox service across Gmail, Slack, WhatsApp, and Teams."""
 
 from __future__ import annotations
 
+from collections import defaultdict
+from datetime import datetime, timezone
 from uuid import UUID
 
 from sqlalchemy import String, case, cast, func, select
 from sqlalchemy.orm import Session
 
+from app.models.connected_account import ConnectedAccount
 from app.models.email import Email
 from app.schemas.inbox import InboxConversationSummary, InboxPlatformCount
+from app.services.slack_service import SlackService
+from app.services.teams_service import TeamsService
+from app.services.whatsapp_bridge_service import WhatsAppBridgeService
+
+SUPPORTED_PLATFORMS = {"gmail", "slack", "whatsapp", "teams", "all"}
 
 
 class InboxService:
     def __init__(self, db: Session) -> None:
         self.db = db
+        self.slack = SlackService(db)
+        self.whatsapp = WhatsAppBridgeService(db)
+        self.teams = TeamsService(db)
 
     def list_conversations(
         self,
@@ -26,9 +37,147 @@ class InboxService:
         limit: int = 50,
         offset: int = 0,
     ) -> tuple[list[InboxConversationSummary], int]:
-        # Phase 3 starts Gmail-first; other platforms return empty until ingesters are added.
-        if platform and platform != "gmail":
-            return [], 0
+        all_conversations = self._collect_conversations(
+            user_id=user_id,
+            platform=platform,
+            account_id=account_id,
+            unread_only=unread_only,
+            search=search,
+        )
+        total = len(all_conversations)
+        return all_conversations[offset : offset + limit], total
+
+    def get_platform_counts(
+        self,
+        user_id: UUID,
+        *,
+        account_id: UUID | None = None,
+        search: str | None = None,
+        platform: str | None = None,
+    ) -> list[InboxPlatformCount]:
+        conversations = self._collect_conversations(
+            user_id=user_id,
+            platform=platform,
+            account_id=account_id,
+            unread_only=False,
+            search=search,
+        )
+        counts_by_platform: dict[str, dict[str, int]] = defaultdict(lambda: {"total": 0, "unread": 0})
+        for conv in conversations:
+            counts_by_platform[conv.platform]["total"] += 1
+            if conv.unread_count > 0:
+                counts_by_platform[conv.platform]["unread"] += 1
+
+        preferred_order = ["gmail", "slack", "whatsapp", "teams"]
+        sorted_platforms = sorted(
+            counts_by_platform.items(),
+            key=lambda item: preferred_order.index(item[0]) if item[0] in preferred_order else 99,
+        )
+        return [
+            InboxPlatformCount(platform=platform_name, total=values["total"], unread=values["unread"])
+            for platform_name, values in sorted_platforms
+            if values["total"] > 0
+        ]
+
+    def _collect_conversations(
+        self,
+        *,
+        user_id: UUID,
+        platform: str | None,
+        account_id: UUID | None,
+        unread_only: bool,
+        search: str | None,
+    ) -> list[InboxConversationSummary]:
+        normalized_platform = (platform or "all").lower()
+        if normalized_platform not in SUPPORTED_PLATFORMS:
+            return []
+
+        # If account_id is provided without platform, infer the provider from account.
+        inferred_platform = self._infer_platform_from_account(user_id=user_id, account_id=account_id)
+        if normalized_platform == "all" and inferred_platform:
+            normalized_platform = inferred_platform
+
+        conversations: list[InboxConversationSummary] = []
+
+        if normalized_platform in {"all", "gmail"}:
+            conversations.extend(
+                self._list_gmail_conversations(
+                    user_id=user_id,
+                    account_id=account_id,
+                    unread_only=unread_only,
+                    search=search,
+                )
+            )
+
+        if normalized_platform in {"all", "slack"}:
+            conversations.extend(
+                self._list_slack_conversations(
+                    user_id=user_id,
+                    account_id=account_id,
+                    unread_only=unread_only,
+                    search=search,
+                )
+            )
+
+        if normalized_platform in {"all", "whatsapp"}:
+            conversations.extend(
+                self._list_whatsapp_conversations(
+                    user_id=user_id,
+                    account_id=account_id,
+                    unread_only=unread_only,
+                    search=search,
+                )
+            )
+
+        if normalized_platform in {"all", "teams"}:
+            conversations.extend(
+                self._list_teams_conversations(
+                    user_id=user_id,
+                    account_id=account_id,
+                    unread_only=unread_only,
+                    search=search,
+                )
+            )
+
+        conversations.sort(
+            key=lambda c: (
+                c.latest_received_at is None,
+                c.latest_received_at or datetime.min.replace(tzinfo=timezone.utc),
+            ),
+            reverse=True,
+        )
+        return conversations
+
+    def _infer_platform_from_account(self, *, user_id: UUID, account_id: UUID | None) -> str | None:
+        if not account_id:
+            return None
+        account = self.db.execute(
+            select(ConnectedAccount).where(
+                ConnectedAccount.id == account_id,
+                ConnectedAccount.user_id == user_id,
+            )
+        ).scalar_one_or_none()
+        if not account:
+            return None
+        if account.provider == "google":
+            return "gmail"
+        if account.provider in {"slack", "whatsapp", "teams"}:
+            return account.provider
+        return None
+
+    def _list_gmail_conversations(
+        self,
+        *,
+        user_id: UUID,
+        account_id: UUID | None,
+        unread_only: bool,
+        search: str | None,
+    ) -> list[InboxConversationSummary]:
+        # Restrict account-filtered queries to Google accounts only.
+        if account_id:
+            inferred = self._infer_platform_from_account(user_id=user_id, account_id=account_id)
+            if inferred not in {None, "gmail"}:
+                return []
 
         thread_key = func.coalesce(
             Email.thread_id,
@@ -121,24 +270,7 @@ class InboxService:
         if unread_only:
             conversations_stmt = conversations_stmt.where(counts_subq.c.unread_count > 0)
 
-        total = self.db.execute(
-            select(func.count()).select_from(conversations_stmt.subquery())
-        ).scalar() or 0
-
-        latest_nulls_last_sort = case(
-            (latest_subq.c.latest_received_at.is_(None), 1),
-            else_=0,
-        )
-        rows = self.db.execute(
-            conversations_stmt
-            .order_by(
-                latest_nulls_last_sort.asc(),
-                latest_subq.c.latest_received_at.desc(),
-                latest_subq.c.created_at.desc(),
-            )
-            .limit(limit)
-            .offset(offset)
-        ).all()
+        rows = self.db.execute(conversations_stmt).all()
 
         conversations: list[InboxConversationSummary] = []
         for row in rows:
@@ -150,7 +282,7 @@ class InboxService:
                     conversation_id=conversation_id,
                     platform="gmail",
                     account_id=row.account_id,
-                    latest_email_id=row.latest_email_id,
+                    latest_email_id=str(row.latest_email_id),
                     sender=sender,
                     sender_address=row.from_address,
                     subject=row.subject,
@@ -163,41 +295,194 @@ class InboxService:
                     latest_received_at=row.latest_received_at,
                 )
             )
+        return conversations
 
-        return conversations, int(total)
-
-    def get_platform_counts(
+    def _list_slack_conversations(
         self,
-        user_id: UUID,
         *,
-        account_id: UUID | None = None,
-        search: str | None = None,
-    ) -> list[InboxPlatformCount]:
-        thread_key = func.coalesce(
-            Email.thread_id,
-            Email.gmail_message_id,
-            cast(Email.id, String()),
-        )
-        filters = [Email.user_id == user_id]
+        user_id: UUID,
+        account_id: UUID | None,
+        unread_only: bool,
+        search: str | None,
+    ) -> list[InboxConversationSummary]:
         if account_id:
-            filters.append(Email.account_id == account_id)
-        if search:
-            self._append_search_filter(filters, search)
+            inferred = self._infer_platform_from_account(user_id=user_id, account_id=account_id)
+            if inferred not in {None, "slack"}:
+                return []
+        try:
+            conversations = self.slack.list_conversations(
+                user_id=user_id,
+                account_id=account_id,
+                unread_only=unread_only,
+                search=search,
+            )
+        except Exception:
+            return []
 
-        total = self.db.execute(
-            select(func.count(func.distinct(thread_key))).where(*filters)
-        ).scalar() or 0
-        unread = self.db.execute(
-            select(
-                func.count(
-                    func.distinct(
-                        case((Email.is_read.is_(False), thread_key), else_=None)
-                    )
+        return [
+            InboxConversationSummary(
+                conversation_id=item.conversation_id,
+                platform="slack",
+                account_id=item.account_id,
+                latest_email_id=item.conversation_id,
+                sender=item.sender,
+                sender_address=None,
+                subject=item.name,
+                preview=item.preview,
+                unread_count=item.unread_count,
+                message_count=item.message_count,
+                has_attachments=item.has_attachments,
+                needs_review=False,
+                category="uncategorized",
+                latest_received_at=item.latest_received_at,
+            )
+            for item in conversations
+        ]
+
+    def _list_whatsapp_conversations(
+        self,
+        *,
+        user_id: UUID,
+        account_id: UUID | None,
+        unread_only: bool,
+        search: str | None,
+    ) -> list[InboxConversationSummary]:
+        stmt = select(ConnectedAccount).where(
+            ConnectedAccount.user_id == user_id,
+            ConnectedAccount.provider == "whatsapp",
+        )
+        if account_id:
+            inferred = self._infer_platform_from_account(user_id=user_id, account_id=account_id)
+            if inferred not in {None, "whatsapp"}:
+                return []
+            stmt = stmt.where(ConnectedAccount.id == account_id)
+
+        accounts = list(self.db.execute(stmt).scalars())
+        if not accounts:
+            return []
+
+        account = accounts[0]
+        rows = self.whatsapp.list_messages(limit=5000)
+        grouped: dict[str, dict] = {}
+
+        for row in rows:
+            chat_jid = (row.get("chat_jid") or row.get("sender_jid") or "").strip()
+            if not chat_jid:
+                continue
+            group = grouped.setdefault(
+                chat_jid,
+                {
+                    "message_count": 0,
+                    "inbound_count": 0,
+                    "latest_received_at": None,
+                    "latest_text": None,
+                    "latest_sender": None,
+                    "latest_message_id": None,
+                    "latest_type": None,
+                },
+            )
+
+            group["message_count"] += 1
+            if not row.get("from_me"):
+                group["inbound_count"] += 1
+
+            received_raw = row.get("received_at")
+            received_at = None
+            if isinstance(received_raw, str):
+                try:
+                    received_at = datetime.fromisoformat(received_raw.replace("Z", "+00:00"))
+                except Exception:
+                    received_at = None
+
+            current_latest = group["latest_received_at"]
+            if current_latest is None or (
+                received_at is not None and received_at > current_latest
+            ):
+                group["latest_received_at"] = received_at
+                group["latest_text"] = row.get("text")
+                group["latest_sender"] = row.get("sender_jid")
+                group["latest_message_id"] = row.get("message_id")
+                group["latest_type"] = row.get("message_type")
+
+        search_lc = search.strip().lower() if search else None
+        conversations: list[InboxConversationSummary] = []
+        for chat_jid, group in grouped.items():
+            sender = (group["latest_sender"] or chat_jid or "WhatsApp").strip()
+            preview = (group["latest_text"] or "").strip() or None
+            unread_count = int(group["inbound_count"] or 0)
+
+            if unread_only and unread_count <= 0:
+                continue
+
+            if search_lc:
+                blob = " ".join([chat_jid, sender, preview or ""]).lower()
+                if search_lc not in blob:
+                    continue
+
+            message_type = (group["latest_type"] or "").lower()
+            has_attachments = message_type not in {"", "conversation", "extendedtextmessage"}
+            conversations.append(
+                InboxConversationSummary(
+                    conversation_id=chat_jid,
+                    platform="whatsapp",
+                    account_id=account.id,
+                    latest_email_id=group["latest_message_id"],
+                    sender=sender,
+                    sender_address=sender,
+                    subject=None,
+                    preview=preview,
+                    unread_count=unread_count,
+                    message_count=int(group["message_count"] or 0),
+                    has_attachments=has_attachments,
+                    needs_review=False,
+                    category="uncategorized",
+                    latest_received_at=group["latest_received_at"],
                 )
-            ).where(*filters)
-        ).scalar() or 0
+            )
+        return conversations
 
-        return [InboxPlatformCount(platform="gmail", total=int(total), unread=int(unread))]
+    def _list_teams_conversations(
+        self,
+        *,
+        user_id: UUID,
+        account_id: UUID | None,
+        unread_only: bool,
+        search: str | None,
+    ) -> list[InboxConversationSummary]:
+        if account_id:
+            inferred = self._infer_platform_from_account(user_id=user_id, account_id=account_id)
+            if inferred not in {None, "teams"}:
+                return []
+
+        try:
+            conversations = self.teams.list_conversations(
+                user_id=user_id,
+                account_id=account_id,
+                unread_only=unread_only,
+                search=search,
+            )
+        except Exception:
+            return []
+
+        return [
+            InboxConversationSummary(
+                conversation_id=item.conversation_id,
+                platform="teams",
+                account_id=item.account_id,
+                latest_email_id=item.conversation_id,
+                sender=item.sender,
+                sender_address=None,
+                subject=item.name,
+                preview=item.preview,
+                unread_count=item.unread_count,
+                message_count=item.message_count,
+                has_attachments=item.has_attachments,
+                needs_review=False,
+                category="uncategorized",
+                latest_received_at=item.latest_received_at,
+            )
+            for item in conversations
+        ]
 
     def _append_search_filter(self, filters: list, search: str) -> None:
         if self.db.bind and self.db.bind.dialect.name == "postgresql":

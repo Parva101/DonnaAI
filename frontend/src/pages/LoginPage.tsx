@@ -1,7 +1,32 @@
+import { useState } from "react";
+import { useNavigate } from "react-router";
 import { Mail } from "lucide-react";
-import { GOOGLE_LOGIN_URL } from "@/lib/api";
+import { devLogin, ApiError, GOOGLE_LOGIN_URL } from "@/lib/api";
+import { useAuthStore } from "@/stores/authStore";
 
 export function LoginPage() {
+  const navigate = useNavigate();
+  const setUser = useAuthStore((s) => s.setUser);
+  const [isDevLoading, setIsDevLoading] = useState(false);
+  const [devError, setDevError] = useState<string | null>(null);
+
+  const handleDevLogin = async () => {
+    setIsDevLoading(true);
+    setDevError(null);
+    try {
+      const session = await devLogin({
+        email: "dev@example.com",
+        full_name: "Dev User",
+      });
+      setUser(session.user);
+      navigate("/dashboard", { replace: true });
+    } catch (err) {
+      setDevError(err instanceof ApiError ? err.message : "Dev sign-in failed.");
+    } finally {
+      setIsDevLoading(false);
+    }
+  };
+
   return (
     <div className="flex min-h-screen items-center justify-center bg-background">
       <div className="w-full max-w-sm space-y-8 px-4">
@@ -46,14 +71,17 @@ export function LoginPage() {
           </a>
         </div>
 
-        {/* Dev login link */}
-        <div className="text-center">
-          <a
-            href="/settings"
-            className="text-xs text-muted-foreground hover:text-foreground transition-colors"
+        {/* Dev login */}
+        <div className="space-y-2 text-center">
+          <button
+            type="button"
+            onClick={handleDevLogin}
+            disabled={isDevLoading}
+            className="text-xs text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50"
           >
-            Dev sign-in →
-          </a>
+            {isDevLoading ? "Signing in..." : "Dev sign-in ->"}
+          </button>
+          {devError && <p className="text-xs text-red-400">{devError}</p>}
         </div>
       </div>
     </div>

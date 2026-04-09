@@ -196,4 +196,4 @@ def test_list_inbox_conversations_unsupported_platform(client_with_threaded_emai
 
     assert data["total"] == 0
     assert data["conversations"] == []
-    assert data["platform_counts"] == []
+    assert data["platform_counts"] == [{"platform": "gmail", "total": 3, "unread": 2}]

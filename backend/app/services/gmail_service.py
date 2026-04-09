@@ -11,13 +11,14 @@ import email as email_lib
 import email.utils
 import logging
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Callable
 from uuid import UUID
 
 import httpx
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
+from app.core.token_crypto import decrypt_token, encrypt_token
 from app.models import ConnectedAccount, Email
 
 logger = logging.getLogger(__name__)
@@ -31,10 +32,25 @@ MAX_RESULTS_PER_PAGE = 100
 
 
 class GmailService:
-    def __init__(self, db: Session, account: ConnectedAccount) -> None:
+    def __init__(
+        self,
+        db: Session,
+        account: ConnectedAccount,
+        *,
+        progress_callback: Callable[[int], None] | None = None,
+    ) -> None:
         self.db = db
         self.account = account
-        self._access_token: str | None = account.access_token_encrypted
+        self._access_token: str | None = decrypt_token(account.access_token_encrypted)
+        self._progress_callback = progress_callback
+
+    def _report_progress(self, newly_synced: int) -> None:
+        if newly_synced <= 0 or self._progress_callback is None:
+            return
+        try:
+            self._progress_callback(newly_synced)
+        except Exception:
+            logger.debug("Failed to emit sync progress callback", exc_info=True)
 
     # ── Token management ────────────────────────────────────────
 
@@ -43,7 +59,8 @@ class GmailService:
         if self.account.token_expires_at and self.account.token_expires_at > datetime.now(timezone.utc):
             return self._access_token or ""
 
-        if not self.account.refresh_token_encrypted:
+        refresh_token = decrypt_token(self.account.refresh_token_encrypted)
+        if not refresh_token:
             raise ValueError("No refresh token available — user needs to reconnect Google.")
 
         async with httpx.AsyncClient() as client:
@@ -52,7 +69,7 @@ class GmailService:
                 data={
                     "client_id": settings.google_client_id,
                     "client_secret": settings.google_client_secret,
-                    "refresh_token": self.account.refresh_token_encrypted,
+                    "refresh_token": refresh_token,
                     "grant_type": "refresh_token",
                 },
             )
@@ -60,9 +77,9 @@ class GmailService:
             data = resp.json()
 
         self._access_token = data["access_token"]
-        self.account.access_token_encrypted = data["access_token"]
+        self.account.access_token_encrypted = encrypt_token(data["access_token"])
         if "refresh_token" in data:
-            self.account.refresh_token_encrypted = data["refresh_token"]
+            self.account.refresh_token_encrypted = encrypt_token(data["refresh_token"])
         from datetime import timedelta
         self.account.token_expires_at = datetime.now(timezone.utc) + timedelta(
             seconds=data.get("expires_in", 3600)
@@ -386,6 +403,7 @@ class GmailService:
             self.db.commit()
             for em in new_emails:
                 self.db.refresh(em)
+            self._report_progress(len(new_emails))
 
         return new_emails
 
@@ -449,6 +467,7 @@ class GmailService:
                 try:
                     self.db.commit()
                     new_emails.extend(page_emails)
+                    self._report_progress(len(page_emails))
                     logger.info(f"Committed page — {len(new_emails)} total new emails")
                 except (IntegrityError, DataError) as e:
                     logger.warning(f"Page commit failed, falling back to one-by-one: {e}")
@@ -459,6 +478,7 @@ class GmailService:
                             self.db.add(em)
                             self.db.commit()
                             new_emails.append(em)
+                            self._report_progress(1)
                         except (IntegrityError, DataError):
                             self.db.rollback()
                             logger.debug(f"Skipping problem row {em.gmail_message_id}")

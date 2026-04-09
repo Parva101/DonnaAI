@@ -1,70 +1,78 @@
 # DonnaAI
 
-DonnaAI is a personal assistant dashboard that unifies communication channels,
-AI workflows, and eventually voice actions into one workspace.
+DonnaAI is a unified personal assistant dashboard that combines:
+- Multi-account Gmail sync + AI categorization
+- Unified inbox across Gmail, Slack, WhatsApp, and Teams
+- Calendar events and slot suggestions
+- AI productivity tools (reply suggestions, priority scoring, action items, semantic search)
+- Voice call workflow scaffolding (LiveKit + Twilio ready)
+- Spotify playback controls and account-to-account library transfer
+- News ingestion (RSS, NewsAPI, Hacker News) with bookmarks and daily briefing
 
-This repository now contains the first executable Phase 1 foundation:
+## Quick Start (Docker Compose)
 
-- `backend/`: FastAPI service skeleton
-- `frontend/`: React 19 + Vite dashboard shell
-- `whatsapp_bridge/`: validated WhatsApp Web bridge proof-of-concept
-- `docs/`: product and planning docs
+### 1) Configure env
 
-## Local development
-
-### PostgreSQL
-
-Local development now uses PostgreSQL through Docker Compose.
+Copy and edit:
 
 ```powershell
-docker compose up -d postgres
-docker compose ps
+copy backend\.env.example backend\.env
+copy frontend\.env.example frontend\.env
 ```
 
-The backend is configured to use:
+### 2) Start full stack
 
-- host: `127.0.0.1`
-- port: `5433`
-- database: `donnaai`
-- user: `donnaai`
-- password: `donnaai`
+```powershell
+docker compose up -d --build
+```
+
+Services:
+- Frontend: `http://localhost:5173`
+- Backend: `http://localhost:8010`
+- API docs: `http://localhost:8010/docs`
+- Postgres: `localhost:5433`
+- Redis: `localhost:6379`
+
+Optional WhatsApp bridge container:
+
+```powershell
+docker compose --profile whatsapp up -d --build
+```
+
+## GCP Deployment (Compute Engine)
+
+Use the GCP override compose profile:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.gcp.yml up -d --build
+```
+
+This runs:
+- Frontend on `http://<VM_PUBLIC_IP>/` (port 80, via Nginx)
+- Backend on `http://<VM_PUBLIC_IP>:8010` (optional direct access)
+- API and WebSocket proxied under same origin (`/api/*`, `/ws/*`)
+
+Full instructions:
+- `docs/GCP_DEPLOYMENT.md`
+- VM bootstrap script: `scripts/gcp/bootstrap_vm.sh`
+
+## Quick Start (Manual Local)
 
 ### Backend
 
 ```powershell
 cd backend
-python -m venv .venv
-.\.venv\Scripts\python -m pip install -e .[dev]
-.\.venv\Scripts\alembic upgrade head
-.\.venv\Scripts\uvicorn app.main:app --reload
+..\.venv\Scripts\python -m pip install -e .[dev]
+..\.venv\Scripts\alembic upgrade head
+..\.venv\Scripts\uvicorn app.main:app --reload --host 0.0.0.0 --port 8010
 ```
 
-Backend health check:
-
-```powershell
-Invoke-WebRequest http://localhost:8000/api/v1/health
-```
-
-Spotify setup (optional, for player controls + account transfer):
-
-- Create a Spotify app in the Spotify Developer Dashboard.
-- Add redirect URI: `http://localhost:8000/api/v1/auth/spotify/callback`.
-- Set `SPOTIFY_CLIENT_ID` and `SPOTIFY_CLIENT_SECRET` in `backend/.env`.
-- Connect Spotify from `Settings` after login.
-- For playlist/library transfer, connect two Spotify accounts and run transfer from `Settings -> Spotify Transfer`.
-- If Spotify was connected before this update, reconnect Spotify once to grant the new playlist/library scopes.
-
-Database migration workflow:
+### Celery worker + beat
 
 ```powershell
 cd backend
-.\.venv\Scripts\alembic upgrade head
-```
-
-When models change later, create a new revision:
-
-```powershell
-.\.venv\Scripts\alembic revision -m "describe schema change"
+..\.venv\Scripts\celery.exe -A app.core.celery_app worker --loglevel=info --pool=solo
+..\.venv\Scripts\celery.exe -A app.core.celery_app beat --loglevel=info
 ```
 
 ### Frontend
@@ -75,33 +83,23 @@ npm install
 npm run dev
 ```
 
-### Celery Worker & Beat
+## Implemented API Areas
 
-Email sync/classify runs as background Celery tasks. Redis must be running first.
+- `/api/v1/emails/*`
+- `/api/v1/inbox/*`
+- `/api/v1/slack/*`, `/api/v1/auth/slack/*`
+- `/api/v1/whatsapp/*`, `/api/v1/auth/whatsapp/*`
+- `/api/v1/teams/*`, `/api/v1/auth/teams/*`
+- `/api/v1/calendar/*`
+- `/api/v1/ai/*`
+- `/api/v1/notifications/*`
+- `/api/v1/voice/*`
+- `/api/v1/spotify/*`, `/api/v1/auth/spotify/*`
+- `/api/v1/news/*`
+- `/api/v1/webhooks/*` (gmail/slack/teams)
 
-```powershell
-docker compose up -d redis
-```
+## Notes
 
-Start the worker (use `--pool=solo` on Windows):
-
-```powershell
-cd backend
-..\.venv\Scripts\celery.exe -A app.core.celery_app worker --loglevel=info --pool=solo
-```
-
-Start the beat scheduler (handles periodic tasks like Gmail watch renewal):
-
-```powershell
-cd backend
-..\.venv\Scripts\celery.exe -A app.core.celery_app beat --loglevel=info
-```
-
-## Phase 1 target
-
-Phase 1 is the foundation layer for:
-
-- multi-user auth and account linkage
-- Gmail as the first production integration
-- unified inbox primitives and dashboard composition
-- a repo structure that can absorb later modules without churn
+- Active email provider in scope is Gmail.
+- Outlook/IMAP/SMTP are intentionally deferred.
+- Connected account tokens are stored encrypted at rest via application-level token crypto helpers.

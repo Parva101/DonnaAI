@@ -110,3 +110,8 @@ Desktop.ini
 *.swo
 
 docs/
+scripts\gcp\bootstrap_vm.sh
+ssh-key-2026-04-03.key.pub
+ssh-key-2026-04-03.key
+donnaai_local_2026-04-03.dump
+scripts/gcp/bootstrap_vm.sh

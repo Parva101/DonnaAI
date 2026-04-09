@@ -1,4 +1,4 @@
-"""Unified inbox API routes (Phase 3 kickoff, Gmail-backed)."""
+"""Unified inbox API routes across Gmail, Slack, and WhatsApp."""
 
 from __future__ import annotations
 
@@ -21,7 +21,7 @@ router = APIRouter(prefix="/inbox", tags=["inbox"])
 def list_conversations(
     platform: str | None = Query(
         None,
-        description="Platform filter (currently supports: gmail)",
+        description="Platform filter (supports: gmail, slack, whatsapp, teams)",
     ),
     account_id: UUID | None = Query(
         None,
@@ -40,13 +40,6 @@ def list_conversations(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> InboxConversationListResponse:
-    if platform and platform != "gmail":
-        return InboxConversationListResponse(
-            conversations=[],
-            total=0,
-            platform_counts=[],
-        )
-
     svc = InboxService(db)
     conversations, total = svc.list_conversations(
         current_user.id,

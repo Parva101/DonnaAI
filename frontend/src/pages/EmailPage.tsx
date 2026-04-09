@@ -12,7 +12,9 @@ import {
 import { cn } from "@/lib/utils";
 import { useAuthStore } from "@/stores/authStore";
 import {
+  getEmailSyncStatus,
   listEmails,
+  retryPendingClassification,
   syncAllEmails,
   updateEmail,
   listConnectedAccounts,
@@ -23,10 +25,12 @@ import type {
   EmailFull,
   EmailCategoryCount,
   ConnectedAccount,
+  EmailSyncStatus,
 } from "@/types";
 import { formatDistanceToNow } from "date-fns";
 import { EmailDetailPanel } from "@/components/email/EmailDetailPanel";
 import { ComposeModal, type ComposeMode } from "@/components/email/ComposeModal";
+import { getSocket } from "@/lib/socket";
 
 // Category display config — colors + nice labels
 const CATEGORY_META: Record<string, { label: string; color: string }> = {
@@ -36,6 +40,7 @@ const CATEGORY_META: Record<string, { label: string; color: string }> = {
   finance: { label: "Finance", color: "text-green-400" },
   travel: { label: "Travel", color: "text-orange-400" },
   promotions: { label: "Promotions", color: "text-pink-400" },
+  newsletters: { label: "Newsletters", color: "text-indigo-400" },
   orders: { label: "Orders", color: "text-amber-400" },
   notifications: { label: "Notifications", color: "text-zinc-400" },
   uncategorized: { label: "Uncategorized", color: "text-zinc-500" },
@@ -64,6 +69,7 @@ export function EmailPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [isSyncing, setIsSyncing] = useState(false);
   const [syncError, setSyncError] = useState<string | null>(null);
+  const [syncStatus, setSyncStatus] = useState<EmailSyncStatus | null>(null);
 
   // Detail panel state
   const [selectedEmailId, setSelectedEmailId] = useState<string | null>(null);
@@ -103,14 +109,65 @@ export function EmailPage() {
     if (user) fetchEmails();
   }, [user, fetchEmails]);
 
+  const refreshSyncStatus = useCallback(async () => {
+    try {
+      const status = await getEmailSyncStatus();
+      setSyncStatus(status);
+
+      const running = status.status === "queued" || status.status === "running";
+      setIsSyncing(running);
+      if (!running) {
+        await fetchEmails();
+      }
+    } catch {
+      // No sync job yet for this user.
+    }
+  }, [fetchEmails]);
+
+  useEffect(() => {
+    void refreshSyncStatus();
+  }, [refreshSyncStatus]);
+
+  useEffect(() => {
+    const running =
+      syncStatus?.status === "queued" || syncStatus?.status === "running";
+    if (!running) return;
+
+    const timer = window.setInterval(() => {
+      void refreshSyncStatus();
+    }, 2000);
+
+    return () => window.clearInterval(timer);
+  }, [syncStatus, refreshSyncStatus]);
+
+  useEffect(() => {
+    const socket = getSocket();
+
+    const onSyncStatus = (payload: EmailSyncStatus) => {
+      if (!payload || typeof payload !== "object") return;
+      setSyncStatus(payload);
+      const running = payload.status === "queued" || payload.status === "running";
+      setIsSyncing(running);
+      if (!running) {
+        void fetchEmails();
+      }
+    };
+
+    socket.on("email_sync_status", onSyncStatus);
+    return () => {
+      socket.off("email_sync_status", onSyncStatus);
+    };
+  }, [fetchEmails]);
+
   // Sync emails from Gmail
   const handleSync = async () => {
     if (accounts.length === 0) return;
     setIsSyncing(true);
     setSyncError(null);
     try {
-      await syncAllEmails();
-      await fetchEmails();
+      const res = await syncAllEmails();
+      setSyncStatus(res.job);
+      await refreshSyncStatus();
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       if (msg.includes("Gmail access not granted") || msg.includes("400")) {
@@ -121,6 +178,20 @@ export function EmailPage() {
         setSyncError(`Sync failed: ${msg}`);
       }
     } finally {
+      setIsSyncing(false);
+    }
+  };
+
+  const handleRetryPending = async () => {
+    setIsSyncing(true);
+    setSyncError(null);
+    try {
+      const status = await retryPendingClassification();
+      setSyncStatus(status);
+      await refreshSyncStatus();
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setSyncError(`Retry failed: ${msg}`);
       setIsSyncing(false);
     }
   };
@@ -165,6 +236,27 @@ export function EmailPage() {
   // Total across all categories
   const allCount = categories.reduce((sum, c) => sum + c.count, 0);
   const allUnread = categories.reduce((sum, c) => sum + c.unread, 0);
+  const syncRunning = syncStatus?.status === "queued" || syncStatus?.status === "running";
+
+  const syncProgressText = (() => {
+    if (!syncStatus) return "";
+    if (syncStatus.stage === "syncing") {
+      return `Syncing accounts ${syncStatus.accounts_done}/${syncStatus.accounts_total} - fetched ${syncStatus.fetched_total}`;
+    }
+    if (syncStatus.stage === "classifying") {
+      return `Classifying emails ${syncStatus.classified_done}/${syncStatus.classify_total}`;
+    }
+    if (syncStatus.status === "completed") {
+      return `Completed - classified ${syncStatus.classified_done}/${syncStatus.classify_total}`;
+    }
+    if (syncStatus.status === "completed_with_errors" || syncStatus.status === "rate_limited") {
+      return `Stopped - remaining pending ${syncStatus.remaining_pending}`;
+    }
+    if (syncStatus.status === "failed") {
+      return "Sync failed";
+    }
+    return "";
+  })();
 
   // No Google accounts connected
   if (accounts.length === 0 && !isLoading) {
@@ -237,16 +329,26 @@ export function EmailPage() {
         {/* Sync button */}
         <button
           onClick={handleSync}
-          disabled={isSyncing}
+          disabled={isSyncing || syncRunning}
           className="flex items-center gap-2 h-9 px-4 rounded-lg bg-secondary text-foreground text-sm font-medium hover:bg-secondary/80 disabled:opacity-50 transition-colors"
         >
-          {isSyncing ? (
+          {isSyncing || syncRunning ? (
             <Loader2 className="h-4 w-4 animate-spin" />
           ) : (
             <RefreshCw className="h-4 w-4" />
           )}
-          {isSyncing ? "Syncing…" : "Sync"}
+          {isSyncing || syncRunning ? "Syncing..." : "Sync"}
         </button>
+
+        {syncStatus && !syncRunning && syncStatus.remaining_pending > 0 && (
+          <button
+            onClick={handleRetryPending}
+            disabled={isSyncing}
+            className="flex items-center gap-2 h-9 px-4 rounded-lg border border-amber-500/40 text-amber-400 text-sm font-medium hover:bg-amber-500/10 disabled:opacity-50 transition-colors"
+          >
+            Try Again
+          </button>
+        )}
 
         {/* Compose button */}
         <button
@@ -257,6 +359,13 @@ export function EmailPage() {
           Compose
         </button>
       </div>
+
+      {syncProgressText && (
+        <div className="text-xs text-muted-foreground">
+          {syncProgressText}
+          {syncStatus?.error ? ` - ${syncStatus.error}` : ""}
+        </div>
+      )}
 
       {/* Dynamic Smart Tabs — only show categories with content */}
       <div className="flex gap-1 border-b border-border overflow-x-auto">

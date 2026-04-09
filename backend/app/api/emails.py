@@ -6,11 +6,12 @@ import logging
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.api.dependencies import get_current_user
 from app.core.db import get_db
-from app.models import ConnectedAccount, User
+from app.models import ConnectedAccount, EmailSyncJob, User
 
 logger = logging.getLogger(__name__)
 from app.schemas.email import (
@@ -28,6 +29,49 @@ from app.schemas.email import (
 from app.services.email_service import EmailService
 
 router = APIRouter(prefix="/emails", tags=["emails"])
+RUNNING_SYNC_STATUSES = {"queued", "running"}
+
+
+def _job_to_status(job: EmailSyncJob) -> EmailSyncStatus:
+    return EmailSyncStatus(
+        job_id=job.id,
+        status=job.status,
+        stage=job.stage,
+        mode=job.mode,
+        accounts_total=job.accounts_total,
+        accounts_done=job.accounts_done,
+        fetched_total=job.fetched_total,
+        classify_total=job.classify_total,
+        classified_done=job.classified_done,
+        failed_count=job.failed_count,
+        remaining_pending=job.remaining_pending,
+        error=job.error,
+        started_at=job.started_at,
+        finished_at=job.finished_at,
+    )
+
+
+def _latest_sync_job(db: Session, user_id) -> EmailSyncJob | None:
+    stmt = (
+        select(EmailSyncJob)
+        .where(EmailSyncJob.user_id == user_id)
+        .order_by(EmailSyncJob.created_at.desc())
+        .limit(1)
+    )
+    return db.execute(stmt).scalar_one_or_none()
+
+
+def _active_sync_job(db: Session, user_id) -> EmailSyncJob | None:
+    stmt = (
+        select(EmailSyncJob)
+        .where(
+            EmailSyncJob.user_id == user_id,
+            EmailSyncJob.status.in_(RUNNING_SYNC_STATUSES),
+        )
+        .order_by(EmailSyncJob.created_at.desc())
+        .limit(1)
+    )
+    return db.execute(stmt).scalar_one_or_none()
 
 
 @router.get("", response_model=EmailListResponse)
@@ -126,9 +170,8 @@ async def sync_all_emails(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> SyncAllStatus:
-    """Sync + classify emails from ALL connected Gmail accounts via Celery."""
-    from sqlalchemy import select
-    from app.workers.tasks import sync_and_classify
+    """Create a sync job for all Gmail accounts and queue Celery worker."""
+    from app.workers.tasks import run_email_sync_job
 
     stmt = select(ConnectedAccount).where(
         ConnectedAccount.user_id == current_user.id,
@@ -143,16 +186,36 @@ async def sync_all_emails(
             detail="No Gmail accounts found. Connect Gmail first.",
         )
 
-    for acct in gmail_accounts:
-        sync_and_classify.delay(
-            account_id=str(acct.id),
-            user_id=str(current_user.id),
-        )
+    active = _active_sync_job(db, current_user.id)
+    if active:
+        return SyncAllStatus(job=_job_to_status(active))
+
+    job = EmailSyncJob(
+        user_id=current_user.id,
+        status="queued",
+        stage="queued",
+        mode="sync_and_classify",
+        accounts_total=len(gmail_accounts),
+        accounts_done=0,
+        fetched_total=0,
+        classify_total=0,
+        classified_done=0,
+        failed_count=0,
+        remaining_pending=0,
+    )
+    db.add(job)
+    db.commit()
+    db.refresh(job)
+
+    run_email_sync_job.delay(
+        job_id=str(job.id),
+        user_id=str(current_user.id),
+        account_ids=[str(a.id) for a in gmail_accounts],
+        classify_only=False,
+    )
 
     return SyncAllStatus(
-        status="syncing",
-        accounts_queued=len(gmail_accounts),
-        account_ids=[a.id for a in gmail_accounts],
+        job=_job_to_status(job),
     )
 
 
@@ -162,13 +225,8 @@ async def sync_emails(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> EmailSyncStatus:
-    """Kick off email sync + classification via Celery.
-
-    Returns immediately so the frontend doesn't timeout.
-    Emails appear progressively as they're fetched.
-    """
-    from sqlalchemy import select
-    from app.workers.tasks import sync_and_classify
+    """Create a sync job for a specific Gmail account and queue worker."""
+    from app.workers.tasks import run_email_sync_job
 
     # Verify the account belongs to the user and is Google
     stmt = select(ConnectedAccount).where(
@@ -190,18 +248,89 @@ async def sync_emails(
             detail="Gmail access not granted. Reconnect Google with Gmail permissions.",
         )
 
-    # Launch sync + classify via Celery (returns immediately)
-    sync_and_classify.delay(
-        account_id=str(account.id),
+    active = _active_sync_job(db, current_user.id)
+    if active:
+        return _job_to_status(active)
+
+    job = EmailSyncJob(
+        user_id=current_user.id,
+        status="queued",
+        stage="queued",
+        mode="sync_and_classify",
+        accounts_total=1,
+        accounts_done=0,
+        fetched_total=0,
+        classify_total=0,
+        classified_done=0,
+        failed_count=0,
+        remaining_pending=0,
+    )
+    db.add(job)
+    db.commit()
+    db.refresh(job)
+
+    run_email_sync_job.delay(
+        job_id=str(job.id),
         user_id=str(current_user.id),
+        account_ids=[str(account.id)],
+        classify_only=False,
     )
 
-    return EmailSyncStatus(
-        status="syncing",
-        synced=0,
-        classified=0,
-        account_id=payload.account_id,
+    return _job_to_status(job)
+
+
+@router.post("/sync/retry", response_model=EmailSyncStatus)
+async def retry_pending_classification(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> EmailSyncStatus:
+    """Retry classification for remaining pending emails without fetching."""
+    from app.workers.tasks import run_email_sync_job
+
+    active = _active_sync_job(db, current_user.id)
+    if active:
+        return _job_to_status(active)
+
+    job = EmailSyncJob(
+        user_id=current_user.id,
+        status="queued",
+        stage="queued",
+        mode="classify_pending",
+        accounts_total=0,
+        accounts_done=0,
+        fetched_total=0,
+        classify_total=0,
+        classified_done=0,
+        failed_count=0,
+        remaining_pending=0,
     )
+    db.add(job)
+    db.commit()
+    db.refresh(job)
+
+    run_email_sync_job.delay(
+        job_id=str(job.id),
+        user_id=str(current_user.id),
+        account_ids=[],
+        classify_only=True,
+    )
+
+    return _job_to_status(job)
+
+
+@router.get("/sync/status", response_model=EmailSyncStatus)
+def get_sync_status(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> EmailSyncStatus:
+    """Return the latest sync/classification job for the current user."""
+    job = _latest_sync_job(db, current_user.id)
+    if not job:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No sync job found for this user.",
+        )
+    return _job_to_status(job)
 
 
 @router.post("/watch")
