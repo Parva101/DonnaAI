@@ -23,6 +23,14 @@ def test_sports_endpoints_require_auth(client: TestClient) -> None:
     assert resp.status_code == 401
 
 
+def test_list_sports_leagues_includes_new_competitions(client: TestClient) -> None:
+    _login(client)
+    resp = client.get("/api/v1/sports/leagues")
+    assert resp.status_code == 200
+    keys = {league["key"] for league in resp.json()["leagues"]}
+    assert {"laliga", "ucl", "f1", "ipl", "cricket_intl"}.issubset(keys)
+
+
 def test_search_sports_teams_mocked(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
     _login(client)
 
@@ -49,6 +57,15 @@ def test_search_sports_teams_mocked(client: TestClient, monkeypatch: pytest.Monk
     payload = resp.json()
     assert payload["total"] == 1
     assert payload["teams"][0]["display_name"] == "Phoenix Suns"
+
+
+def test_search_cricket_teams_static_catalog(client: TestClient) -> None:
+    _login(client)
+    resp = client.get("/api/v1/sports/teams/search?query=india&league=cricket_intl")
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert payload["total"] >= 1
+    assert any(team["display_name"] == "India" for team in payload["teams"])
 
 
 def test_track_list_and_untrack_team(client: TestClient) -> None:
