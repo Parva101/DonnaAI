@@ -93,10 +93,17 @@ backend/uv.lock
 # Notebook / local scratch
 # ----------------------------
 .ipynb_checkpoints/
+test.ipynb
 *.tmp
 *.temp
 *.bak
 *.orig
+
+# Local browser automation artifacts
+.playwright-cli/
+
+# Local reference clone (not part of DonnaAI source)
+openclaw/
 
 # ----------------------------
 # OS / editor
