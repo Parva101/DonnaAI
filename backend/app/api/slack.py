@@ -39,6 +39,11 @@ def list_slack_conversations(
         )
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Slack API failed: {exc}",
+        )
     return SlackConversationListResponse(conversations=conversations, total=len(conversations))
 
 
@@ -60,6 +65,11 @@ def list_slack_messages(
         )
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Slack API failed: {exc}",
+        )
     return SlackMessageListResponse(messages=messages, total=len(messages))
 
 
@@ -79,4 +89,9 @@ def send_slack_message(
         )
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Slack API failed: {exc}",
+        )
     return SlackSendResponse(status="sent", channel=result["channel"], ts=result["ts"])

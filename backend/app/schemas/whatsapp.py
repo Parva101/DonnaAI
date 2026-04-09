@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from uuid import UUID
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class WhatsAppStatusResponse(BaseModel):
@@ -12,7 +12,6 @@ class WhatsAppStatusResponse(BaseModel):
     device_id: str
     qr_data_uri: str | None = None
     qr_text: str | None = None
-    messages_log_exists: bool
     connection_state: str | None = None
     me_jid: str | None = None
     state_updated_at: str | None = None
@@ -20,29 +19,14 @@ class WhatsAppStatusResponse(BaseModel):
 
 
 class WhatsAppSendRequest(BaseModel):
-    to: str
-    text: str
+    to: str = Field(..., min_length=1)
+    text: str = Field(..., min_length=1)
 
 
 class WhatsAppSendResponse(BaseModel):
     status: str
-
-
-class WhatsAppMessage(BaseModel):
-    direction: str | None = None
-    chat_jid: str | None = None
-    sender_jid: str | None = None
-    from_me: bool | None = None
-    is_group: bool | None = None
+    to: str | None = None
     message_id: str | None = None
-    timestamp: int | None = None
-    received_at: str | None = None
-    message_type: str | None = None
-    text: str | None = None
-
-
-class WhatsAppMessagesResponse(BaseModel):
-    messages: list[WhatsAppMessage]
 
 
 class WhatsAppConversationSummary(BaseModel):

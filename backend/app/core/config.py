@@ -88,9 +88,26 @@ class Settings(BaseSettings):
     gmail_pubsub_topic: str = ""
     gmail_webhook_url: str = ""
 
-    # WhatsApp bridge
-    whatsapp_bridge_runtime_dir: str = "../whatsapp_bridge/runtime"
-    whatsapp_bridge_device_id: str = "donna-whatsapp-poc"
+    # OpenClaw gateway integration
+    openclaw_cli_path: str = "openclaw"
+    openclaw_node_path: str = ""
+    openclaw_profile: str = ""
+    openclaw_workdir: str = ""
+    openclaw_gateway_url: str = ""
+    openclaw_gateway_token: str = ""
+    openclaw_gateway_password: str = ""
+    openclaw_gateway_timeout_ms: int = 30000
+
+    # OpenClaw channel toggles and account mapping
+    openclaw_enable_slack: bool = False
+    openclaw_enable_teams: bool = False
+
+    openclaw_whatsapp_channel: str = "whatsapp"
+    openclaw_whatsapp_account_id: str = ""
+    openclaw_slack_channel: str = "slack"
+    openclaw_slack_account_id: str = ""
+    openclaw_teams_channel: str = "teams"
+    openclaw_teams_account_id: str = ""
 
     model_config = SettingsConfigDict(
         env_file=os.path.join(

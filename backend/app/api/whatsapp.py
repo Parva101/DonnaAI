@@ -66,13 +66,21 @@ def whatsapp_conversations(
         return WhatsAppConversationListResponse(conversations=[], total=0)
 
     sync = ChatSyncService(db)
-    items = sync.list_whatsapp_conversations(
-        user_id=current_user.id,
-        account_id=account.id,
-        unread_only=unread_only,
-        search=search,
-        limit=limit,
-    )
+    try:
+        items = sync.list_whatsapp_conversations(
+            user_id=current_user.id,
+            account_id=account.id,
+            unread_only=unread_only,
+            search=search,
+            limit=limit,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"WhatsApp API failed: {exc}",
+        )
     conversations = [
         WhatsAppConversationSummary(
             account_id=account.id,
@@ -106,12 +114,20 @@ def whatsapp_conversation_messages(
         return WhatsAppConversationMessagesResponse(messages=[], total=0)
 
     sync = ChatSyncService(db)
-    items = sync.list_whatsapp_messages(
-        user_id=current_user.id,
-        account_id=account.id,
-        conversation_id=chat_jid,
-        limit=limit,
-    )
+    try:
+        items = sync.list_whatsapp_messages(
+            user_id=current_user.id,
+            account_id=account.id,
+            conversation_id=chat_jid,
+            limit=limit,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"WhatsApp API failed: {exc}",
+        )
     messages = [WhatsAppConversationMessage(**item) for item in items]
     return WhatsAppConversationMessagesResponse(messages=messages, total=len(messages))
 
@@ -130,10 +146,22 @@ def whatsapp_send(
             detail="No WhatsApp account connected.",
         )
     sync = ChatSyncService(db)
-    sync.send_whatsapp_message(
-        user_id=current_user.id,
-        account_id=account.id,
-        to=payload.to,
-        text=payload.text,
+    try:
+        result = sync.send_whatsapp_message(
+            user_id=current_user.id,
+            account_id=account.id,
+            to=payload.to,
+            text=payload.text,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"WhatsApp API failed: {exc}",
+        )
+    return WhatsAppSendResponse(
+        status="sent",
+        to=str(result.get("to") or payload.to),
+        message_id=(str(result.get("message_id")) if result.get("message_id") else None),
     )
-    return WhatsAppSendResponse(status="sent")

@@ -124,3 +124,20 @@ def test_send_slack_message_mocked(client: TestClient, monkeypatch: pytest.Monke
     data = resp.json()
     assert data["status"] == "sent"
     assert data["channel"] == "C123"
+
+
+def test_list_slack_conversations_returns_502_on_provider_failure(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    user = _login(client)
+    _seed_slack_account(client, user["id"])
+
+    def boom(self, *, user_id, account_id=None, search=None, unread_only=False):
+        raise RuntimeError("upstream unavailable")
+
+    monkeypatch.setattr(SlackService, "list_conversations", boom)
+
+    resp = client.get("/api/v1/slack/conversations")
+    assert resp.status_code == 502
+    assert "Slack API failed" in resp.json()["detail"]

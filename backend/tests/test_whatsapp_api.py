@@ -113,7 +113,7 @@ def test_send_whatsapp_message_mocked(client: TestClient, monkeypatch: pytest.Mo
     def fake_send(self, to: str, text: str):
         assert to == "91999@s.whatsapp.net"
         assert text == "Ping from Donna"
-        return {"status": "sent"}
+        return {"status": "sent", "to": to, "message_id": "wa-msg-2"}
 
     monkeypatch.setattr(WhatsAppService, "send_message", fake_send)
     resp = client.post(
@@ -123,3 +123,41 @@ def test_send_whatsapp_message_mocked(client: TestClient, monkeypatch: pytest.Mo
     assert resp.status_code == 200
     payload = resp.json()
     assert payload["status"] == "sent"
+    assert payload["message_id"] == "wa-msg-2"
+
+
+def test_send_whatsapp_message_normalizes_target(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    user = _login(client)
+    account = _seed_whatsapp_account(client, user["id"])
+    observed: dict[str, str] = {}
+
+    def fake_send(self, to: str, text: str):
+        observed["to"] = to
+        assert text == "Normalized"
+        return {"status": "sent", "to": to, "message_id": "wa-msg-3"}
+
+    monkeypatch.setattr(WhatsAppService, "send_message", fake_send)
+    resp = client.post(
+        f"/api/v1/whatsapp/send?account_id={account.id}",
+        json={"to": "+1 (602) 740-6693", "text": "Normalized"},
+    )
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert observed["to"] == "16027406693@s.whatsapp.net"
+    assert payload["to"] == "16027406693@s.whatsapp.net"
+    assert payload["message_id"] == "wa-msg-3"
+
+
+def test_send_whatsapp_message_rejects_invalid_target(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    user = _login(client)
+    account = _seed_whatsapp_account(client, user["id"])
+
+    monkeypatch.setattr(WhatsAppService, "send_message", lambda self, to, text: {"status": "sent"})
+    resp = client.post(
+        f"/api/v1/whatsapp/send?account_id={account.id}",
+        json={"to": "invalid@domain.com", "text": "Hello"},
+    )
+    assert resp.status_code == 400

@@ -763,12 +763,13 @@ class ChatSyncService:
             raise ValueError("No WhatsApp account connected.")
 
         service = WhatsAppService(self.db, account_id=account.provider_account_id)
+        target = service.normalize_target(to)
         idempotency_key = f"whatsapp:{account.id}:{uuid4()}"
         conversation = self.storage.upsert_conversation(
             user_id=user_id,
             account_id=account.id,
             platform="whatsapp",
-            external_conversation_id=to,
+            external_conversation_id=target,
             sender="WhatsApp",
             preview=text,
             latest_received_at=_utcnow(),
@@ -778,9 +779,9 @@ class ChatSyncService:
             user_id=user_id,
             account_id=account.id,
             platform="whatsapp",
-            target=to,
+            target=target,
             request_text=text,
-            request_payload={"to": to, "text": text},
+            request_payload={"to": target, "text": text},
             idempotency_key=idempotency_key,
             conversation=conversation,
             status="queued",
@@ -788,15 +789,16 @@ class ChatSyncService:
         self.db.flush()
 
         try:
-            result = service.send_message(to=to, text=text)
+            result = service.send_message(to=target, text=text)
+            provider_message_id = str(result.get("message_id") or "").strip() or None
             self.storage.update_outbound_action(
                 idempotency_key=idempotency_key,
                 status="sent",
-                provider_message_id=None,
+                provider_message_id=provider_message_id,
             )
             self.storage.upsert_message(
                 conversation=conversation,
-                external_message_id=None,
+                external_message_id=provider_message_id,
                 sender="You",
                 sender_id=None,
                 text=text,

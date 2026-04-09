@@ -10,6 +10,7 @@ import hashlib
 import hmac
 import json
 import logging
+import re
 import time
 from datetime import datetime, timezone
 
@@ -20,6 +21,7 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.core.db import get_db
 from app.models import ConnectedAccount
+from app.services.chat_storage_service import ChatStorageService
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +30,33 @@ router = APIRouter(prefix="/webhooks", tags=["webhooks"])
 
 def _utcnow_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _parse_slack_ts(ts_raw: str | None) -> datetime | None:
+    if not ts_raw:
+        return None
+    try:
+        return datetime.fromtimestamp(float(ts_raw), tz=timezone.utc)
+    except Exception:
+        return None
+
+
+def _parse_iso_dt(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except Exception:
+        return None
+
+
+def _strip_html(value: str | None) -> str:
+    if not value:
+        return ""
+    text = value.replace("<br>", " ").replace("<br/>", " ").replace("<br />", " ")
+    text = re.sub(r"<[^>]+>", " ", text)
+    text = text.replace("&nbsp;", " ").strip()
+    return re.sub(r"\s+", " ", text).strip()
 
 
 async def _emit_platform_event(*, user_id: str, platform: str, payload: dict) -> None:
@@ -175,12 +204,20 @@ async def slack_events(request: Request, db: Session = Depends(get_db)) -> dict:
                 )
             ).scalars()
         )
+        storage = ChatStorageService(db)
+        event_id = str(body.get("event_id") or "")
+        channel_type = str(event.get("channel_type") or "").strip().lower()
+        is_message_event = event_type == "message"
+        has_changes = False
+
         for account in accounts:
             meta = dict(account.account_metadata or {})
             meta["last_slack_event_at"] = _utcnow_iso()
             meta["last_slack_event_type"] = str(event_type or "")
             account.account_metadata = meta
             db.add(account)
+            has_changes = True
+
             await _emit_platform_event(
                 user_id=str(account.user_id),
                 platform="slack",
@@ -190,7 +227,68 @@ async def slack_events(request: Request, db: Session = Depends(get_db)) -> dict:
                     "team_id": team_id,
                 },
             )
-        if accounts:
+
+            if not is_message_event:
+                continue
+
+            message_payload = event.get("message") if event.get("subtype") == "message_changed" else event
+            if not isinstance(message_payload, dict):
+                continue
+            if message_payload.get("subtype") == "message_deleted":
+                continue
+
+            conversation_id = str(message_payload.get("channel") or event.get("channel") or "").strip()
+            message_ts = str(message_payload.get("ts") or "").strip()
+            if not conversation_id or not message_ts:
+                continue
+
+            sender_id = str(message_payload.get("user") or "").strip() or None
+            sender = (
+                str(message_payload.get("username") or "").strip()
+                or sender_id
+                or str(message_payload.get("bot_id") or "").strip()
+                or "Slack"
+            )
+            text = str(message_payload.get("text") or "").strip() or None
+            bot_id = str(message_payload.get("bot_id") or "").strip()
+            from_me = bool(
+                (sender_id and sender_id == str(meta.get("authed_user_id") or "").strip())
+                or (bot_id and bot_id == str(meta.get("bot_user_id") or "").strip())
+            )
+            sent_at = _parse_slack_ts(message_ts)
+
+            conversation = storage.upsert_conversation(
+                user_id=account.user_id,
+                account_id=account.id,
+                platform="slack",
+                external_conversation_id=conversation_id,
+                sender=sender,
+                preview=text,
+                latest_received_at=sent_at,
+                has_attachments=bool(message_payload.get("files")),
+                is_im=channel_type in {"im", "mpim"},
+                is_private=channel_type in {"group"},
+                metadata={
+                    "source": "webhook",
+                    "event_id": event_id,
+                },
+            )
+            storage.upsert_message(
+                conversation=conversation,
+                external_message_id=message_ts,
+                sender=sender,
+                sender_id=sender_id,
+                text=text,
+                direction="outbound" if from_me else "inbound",
+                subtype=str(message_payload.get("subtype") or "").strip() or None,
+                thread_ref=str(message_payload.get("thread_ts") or "").strip() or None,
+                has_attachments=bool(message_payload.get("files")),
+                sent_at=sent_at,
+                raw_payload=message_payload,
+                fallback_seed=event_id or message_ts,
+            )
+            has_changes = True
+        if accounts and has_changes:
             db.commit()
 
     return {"status": "ok"}
@@ -214,18 +312,46 @@ async def teams_events(request: Request, db: Session = Depends(get_db)) -> dict:
     logger.info("[Teams Webhook] Received %s notifications", len(notifications))
 
     if notifications:
+        storage = ChatStorageService(db)
         accounts = list(
             db.execute(
                 select(ConnectedAccount).where(ConnectedAccount.provider == "teams")
             ).scalars()
         )
-        account_by_user = {str(a.user_id): a for a in accounts}
+        accounts_by_user: dict[str, list[ConnectedAccount]] = {}
+        for account in accounts:
+            accounts_by_user.setdefault(str(account.user_id), []).append(account)
         touched_users: set[str] = set()
+        has_changes = False
 
         for notification in notifications:
             tenant_id = str(notification.get("tenantId") or "").strip()
             change_type = str(notification.get("changeType") or "").strip()
             resource = str(notification.get("resource") or "").strip()
+            resource_data = notification.get("resourceData")
+            if not isinstance(resource_data, dict):
+                resource_data = {}
+
+            chat_id = str(
+                resource_data.get("chatId")
+                or resource_data.get("conversationId")
+                or ""
+            ).strip()
+            message_id = str(resource_data.get("id") or "").strip()
+            if (not chat_id or not message_id) and resource:
+                chat_match = re.search(r"chats\('([^']+)'\)", resource)
+                message_match = re.search(r"messages\('([^']+)'\)", resource)
+                if not chat_id and chat_match:
+                    chat_id = chat_match.group(1).strip()
+                if not message_id and message_match:
+                    message_id = message_match.group(1).strip()
+            body_obj = resource_data.get("body") if isinstance(resource_data.get("body"), dict) else {}
+            text = _strip_html(body_obj.get("content")) or None
+            created_at = _parse_iso_dt(str(resource_data.get("createdDateTime") or "").strip() or None)
+            from_obj = resource_data.get("from") if isinstance(resource_data.get("from"), dict) else {}
+            user_obj = from_obj.get("user") if isinstance(from_obj.get("user"), dict) else {}
+            sender = str(user_obj.get("displayName") or user_obj.get("id") or "Teams").strip()
+            sender_id = str(user_obj.get("id") or "").strip() or None
 
             for account in accounts:
                 meta = dict(account.account_metadata or {})
@@ -243,16 +369,55 @@ async def teams_events(request: Request, db: Session = Depends(get_db)) -> dict:
                     },
                 )
 
-        for user_id in touched_users:
-            account = account_by_user.get(user_id)
-            if not account:
-                continue
-            meta = dict(account.account_metadata or {})
-            meta["last_teams_event_at"] = _utcnow_iso()
-            account.account_metadata = meta
-            db.add(account)
+                if (
+                    change_type.lower() in {"created", "updated"}
+                    and chat_id
+                    and message_id
+                ):
+                    conversation = storage.upsert_conversation(
+                        user_id=account.user_id,
+                        account_id=account.id,
+                        platform="teams",
+                        external_conversation_id=chat_id,
+                        sender=sender,
+                        preview=text,
+                        latest_received_at=created_at,
+                        metadata={
+                            "source": "webhook",
+                            "resource": resource,
+                        },
+                        is_group=True,
+                    )
+                    storage.upsert_message(
+                        conversation=conversation,
+                        external_message_id=message_id,
+                        sender=sender,
+                        sender_id=sender_id,
+                        text=text,
+                        direction=(
+                            "outbound"
+                            if sender_id and sender_id == str(account.provider_account_id or "").strip()
+                            else "inbound"
+                        ),
+                        subtype=None,
+                        thread_ref=None,
+                        has_attachments=bool(resource_data.get("attachments")),
+                        sent_at=created_at,
+                        raw_payload=notification,
+                        fallback_seed=message_id,
+                    )
+                    has_changes = True
 
-        if touched_users:
+        for user_id in touched_users:
+            user_accounts = accounts_by_user.get(user_id) or []
+            for account in user_accounts:
+                meta = dict(account.account_metadata or {})
+                meta["last_teams_event_at"] = _utcnow_iso()
+                account.account_metadata = meta
+                db.add(account)
+                has_changes = True
+
+        if touched_users and has_changes:
             db.commit()
 
     return {"status": "ok"}

@@ -251,7 +251,7 @@ def test_whatsapp_api_persists_messages_and_outbound(
         ]
 
     def fake_send(self, to: str, text: str):
-        return {"status": "sent"}
+        return {"status": "sent", "to": to, "message_id": "wa-out-1"}
 
     monkeypatch.setattr(WhatsAppService, "list_conversations", fake_list_conversations)
     monkeypatch.setattr(WhatsAppService, "list_conversation_messages", fake_list_messages)
@@ -300,3 +300,4 @@ def test_whatsapp_api_persists_messages_and_outbound(
     ).scalar_one_or_none()
     assert outbound is not None
     assert outbound.status == "sent"
+    assert outbound.provider_message_id == "wa-out-1"

@@ -92,3 +92,19 @@ def test_send_teams_message_mocked(client: TestClient, monkeypatch: pytest.Monke
     payload = resp.json()
     assert payload["status"] == "sent"
     assert payload["message_id"] == "abc-123"
+
+
+def test_list_teams_conversations_returns_502_on_provider_failure(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    user = _login(client)
+    _seed_teams_account(client, user["id"])
+
+    def boom(self, *, user_id, account_id=None, search=None, unread_only=False):
+        raise RuntimeError("graph unavailable")
+
+    monkeypatch.setattr(TeamsService, "list_conversations", boom)
+    resp = client.get("/api/v1/teams/conversations")
+    assert resp.status_code == 502
+    assert "Teams API failed" in resp.json()["detail"]

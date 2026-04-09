@@ -40,7 +40,9 @@ def list_teams_conversations(
             search=search,
         )
     except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc))
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+    except Exception as exc:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"Teams API failed: {exc}")
     return TeamsConversationListResponse(conversations=conversations, total=len(conversations))
 
 
@@ -61,7 +63,7 @@ def list_teams_messages(
             limit=limit,
         )
     except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc))
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
     except Exception as exc:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"Teams API failed: {exc}")
     return TeamsMessageListResponse(messages=messages, total=len(messages))
@@ -85,7 +87,7 @@ def send_teams_message(
             account_id=payload.account_id,
         )
     except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc))
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
     except Exception as exc:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"Teams API failed: {exc}")
 
@@ -106,6 +108,6 @@ def get_teams_presence(
     try:
         return svc.get_presence(user_id=current_user.id, account_id=account_id)
     except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc))
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
     except Exception as exc:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"Teams API failed: {exc}")

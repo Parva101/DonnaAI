@@ -2,16 +2,21 @@
 
 Last Updated: 2026-04-09
 Owner: DonnaAI engineering
-Status: Runtime integration strategy archived; code reuse strategy active
+Status: Transition mode (native-first target, compatibility bridge active)
 
 ## Direction Lock
-- DonnaAI is not integrating OpenClaw as a production runtime dependency.
+- DonnaAI target architecture is native connector runtime owned by DonnaAI.
 - DonnaAI uses `openclaw/` as a source code reference to accelerate connector implementation.
 - DonnaAI backend remains responsible for:
   - ingestion runtime
   - normalized persistence
   - outbound action execution
   - audit and policy controls
+
+## Current Runtime Reality (2026-04-09)
+- WhatsApp ingestion/send currently runs through an OpenClaw gateway compatibility adapter.
+- Slack and Teams run native APIs by default, with optional OpenClaw fallback toggles.
+- Canonical source of truth is DonnaAI DB (`chat_conversations`, `chat_messages`, `chat_outbound_actions`) regardless of upstream path.
 
 ## Why This Pivot
 - Current OpenClaw runtime path creates ingestion reliability and account-state ambiguity for DonnaAI goals.
@@ -49,3 +54,14 @@ Do not:
 
 ## Historical Note
 Previous OpenClaw gateway-based adapter work remains in git history and may serve as temporary compatibility code until native Donna ingestion is complete. New development should target Donna-native connectors first.
+
+## Latest Hardening Pass (2026-04-09)
+- Added webhook-to-DB ingestion for:
+  - Slack `message` events
+  - Teams notifications when `resourceData` includes message payload
+- Added connector transport hardening:
+  - Slack retry/backoff for transient failures + explicit auth error surfacing
+  - Teams retry/backoff + token refresh path using stored refresh token
+- Improved WhatsApp outbound reliability:
+  - target normalization (phone/JID handling)
+  - provider message ID extraction + persistence into outbound action records

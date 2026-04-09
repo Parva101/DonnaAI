@@ -72,17 +72,22 @@ class ChatStorageService:
         ).scalar_one_or_none()
 
         if existing:
-            existing.name = name
-            existing.sender = sender
-            existing.preview = preview
+            if name is not None:
+                existing.name = name
+            if sender is not None:
+                existing.sender = sender
+            if preview is not None:
+                existing.preview = preview
             existing.unread_count = max(int(unread_count or 0), 0)
             existing.message_count = max(int(message_count or 0), existing.message_count, 0)
             existing.has_attachments = bool(has_attachments)
-            existing.latest_received_at = latest_received_at
+            if latest_received_at is not None:
+                existing.latest_received_at = latest_received_at
             existing.is_group = bool(is_group)
             existing.is_im = bool(is_im)
             existing.is_private = bool(is_private)
-            existing.conversation_metadata = metadata
+            if metadata is not None:
+                existing.conversation_metadata = metadata
             row = existing
         else:
             row = ChatConversation(
