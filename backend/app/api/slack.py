@@ -16,7 +16,7 @@ from app.schemas.slack import (
     SlackSendRequest,
     SlackSendResponse,
 )
-from app.services.slack_service import SlackService
+from app.services.chat_sync_service import ChatSyncService
 
 router = APIRouter(prefix="/slack", tags=["slack"])
 
@@ -29,9 +29,9 @@ def list_slack_conversations(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> SlackConversationListResponse:
-    svc = SlackService(db)
+    svc = ChatSyncService(db)
     try:
-        conversations = svc.list_conversations(
+        conversations = svc.list_slack_conversations(
             user_id=current_user.id,
             account_id=account_id,
             search=search,
@@ -50,9 +50,9 @@ def list_slack_messages(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> SlackMessageListResponse:
-    svc = SlackService(db)
+    svc = ChatSyncService(db)
     try:
-        messages = svc.list_messages(
+        messages = svc.list_slack_messages(
             user_id=current_user.id,
             conversation_id=conversation_id,
             account_id=account_id,
@@ -69,9 +69,9 @@ def send_slack_message(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> SlackSendResponse:
-    svc = SlackService(db)
+    svc = ChatSyncService(db)
     try:
-        result = svc.send_message(
+        result = svc.send_slack_message(
             user_id=current_user.id,
             conversation_id=payload.conversation_id,
             text=payload.text,

@@ -14,7 +14,7 @@ os.environ["DATABASE_URL"] = "sqlite+pysqlite:///:memory:"
 os.environ["SESSION_SECRET_KEY"] = "testing-session-secret-key-change-me-32"
 
 from app.core.db import get_db
-from app.main import app
+from app.main import fastapi_app
 from app.models import Base
 
 
@@ -39,10 +39,10 @@ def client() -> Iterator[TestClient]:
         finally:
             db.close()
 
-    app.dependency_overrides[get_db] = override_get_db
+    fastapi_app.dependency_overrides[get_db] = override_get_db
 
-    with TestClient(app) as test_client:
+    with TestClient(fastapi_app) as test_client:
         yield test_client
 
-    app.dependency_overrides.clear()
+    fastapi_app.dependency_overrides.clear()
     Base.metadata.drop_all(bind=engine)

@@ -12,9 +12,7 @@ from sqlalchemy.orm import Session
 from app.models.connected_account import ConnectedAccount
 from app.models.email import Email
 from app.schemas.inbox import InboxConversationSummary, InboxPlatformCount
-from app.services.slack_service import SlackService
-from app.services.teams_service import TeamsService
-from app.services.whatsapp_bridge_service import WhatsAppBridgeService
+from app.services.chat_sync_service import ChatSyncService
 
 SUPPORTED_PLATFORMS = {"gmail", "slack", "whatsapp", "teams", "all"}
 
@@ -22,9 +20,7 @@ SUPPORTED_PLATFORMS = {"gmail", "slack", "whatsapp", "teams", "all"}
 class InboxService:
     def __init__(self, db: Session) -> None:
         self.db = db
-        self.slack = SlackService(db)
-        self.whatsapp = WhatsAppBridgeService(db)
-        self.teams = TeamsService(db)
+        self.chat_sync = ChatSyncService(db)
 
     def list_conversations(
         self,
@@ -310,7 +306,7 @@ class InboxService:
             if inferred not in {None, "slack"}:
                 return []
         try:
-            conversations = self.slack.list_conversations(
+            conversations = self.chat_sync.list_slack_conversations(
                 user_id=user_id,
                 account_id=account_id,
                 unread_only=unread_only,
@@ -357,88 +353,40 @@ class InboxService:
                 return []
             stmt = stmt.where(ConnectedAccount.id == account_id)
 
-        accounts = list(self.db.execute(stmt).scalars())
-        if not accounts:
-            return []
-
-        account = accounts[0]
-        rows = self.whatsapp.list_messages(limit=5000)
-        grouped: dict[str, dict] = {}
-
-        for row in rows:
-            chat_jid = (row.get("chat_jid") or row.get("sender_jid") or "").strip()
-            if not chat_jid:
-                continue
-            group = grouped.setdefault(
-                chat_jid,
-                {
-                    "message_count": 0,
-                    "inbound_count": 0,
-                    "latest_received_at": None,
-                    "latest_text": None,
-                    "latest_sender": None,
-                    "latest_message_id": None,
-                    "latest_type": None,
-                },
-            )
-
-            group["message_count"] += 1
-            if not row.get("from_me"):
-                group["inbound_count"] += 1
-
-            received_raw = row.get("received_at")
-            received_at = None
-            if isinstance(received_raw, str):
-                try:
-                    received_at = datetime.fromisoformat(received_raw.replace("Z", "+00:00"))
-                except Exception:
-                    received_at = None
-
-            current_latest = group["latest_received_at"]
-            if current_latest is None or (
-                received_at is not None and received_at > current_latest
-            ):
-                group["latest_received_at"] = received_at
-                group["latest_text"] = row.get("text")
-                group["latest_sender"] = row.get("sender_jid")
-                group["latest_message_id"] = row.get("message_id")
-                group["latest_type"] = row.get("message_type")
-
-        search_lc = search.strip().lower() if search else None
         conversations: list[InboxConversationSummary] = []
-        for chat_jid, group in grouped.items():
-            sender = (group["latest_sender"] or chat_jid or "WhatsApp").strip()
-            preview = (group["latest_text"] or "").strip() or None
-            unread_count = int(group["inbound_count"] or 0)
-
-            if unread_only and unread_count <= 0:
-                continue
-
-            if search_lc:
-                blob = " ".join([chat_jid, sender, preview or ""]).lower()
-                if search_lc not in blob:
+        for account in self.db.execute(stmt).scalars():
+            items = self.chat_sync.list_whatsapp_conversations(
+                user_id=user_id,
+                account_id=account.id,
+                unread_only=unread_only,
+                search=search,
+                limit=5000,
+            )
+            for item in items:
+                sender = (item.get("sender") or item.get("conversation_id") or "WhatsApp").strip()
+                preview = (item.get("preview") or "").strip() or None
+                conversation_id = str(item.get("conversation_id") or "").strip()
+                if not conversation_id:
                     continue
 
-            message_type = (group["latest_type"] or "").lower()
-            has_attachments = message_type not in {"", "conversation", "extendedtextmessage"}
-            conversations.append(
-                InboxConversationSummary(
-                    conversation_id=chat_jid,
-                    platform="whatsapp",
-                    account_id=account.id,
-                    latest_email_id=group["latest_message_id"],
-                    sender=sender,
-                    sender_address=sender,
-                    subject=None,
-                    preview=preview,
-                    unread_count=unread_count,
-                    message_count=int(group["message_count"] or 0),
-                    has_attachments=has_attachments,
-                    needs_review=False,
-                    category="uncategorized",
-                    latest_received_at=group["latest_received_at"],
+                conversations.append(
+                    InboxConversationSummary(
+                        conversation_id=conversation_id,
+                        platform="whatsapp",
+                        account_id=account.id,
+                        latest_email_id=conversation_id,
+                        sender=sender,
+                        sender_address=sender,
+                        subject=None,
+                        preview=preview,
+                        unread_count=int(item.get("unread_count") or 0),
+                        message_count=int(item.get("message_count") or 0),
+                        has_attachments=bool(item.get("has_attachments")),
+                        needs_review=False,
+                        category="uncategorized",
+                        latest_received_at=item.get("latest_received_at"),
+                    )
                 )
-            )
         return conversations
 
     def _list_teams_conversations(
@@ -455,7 +403,7 @@ class InboxService:
                 return []
 
         try:
-            conversations = self.teams.list_conversations(
+            conversations = self.chat_sync.list_teams_conversations(
                 user_id=user_id,
                 account_id=account_id,
                 unread_only=unread_only,

@@ -1,4 +1,4 @@
-"""Tests for WhatsApp bridge API routes."""
+"""Tests for WhatsApp OpenClaw API routes."""
 
 from __future__ import annotations
 
@@ -9,9 +9,9 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.core.db import get_db
-from app.main import app
+from app.main import fastapi_app
 from app.models import ConnectedAccount
-from app.services.whatsapp_bridge_service import WhatsAppBridgeService
+from app.services.whatsapp_service import WhatsAppService
 
 
 def _login(client: TestClient) -> dict:
@@ -24,7 +24,7 @@ def _login(client: TestClient) -> dict:
 
 
 def _seed_whatsapp_account(client: TestClient, user_id: str) -> ConnectedAccount:
-    db_gen = app.dependency_overrides[get_db]()
+    db_gen = fastapi_app.dependency_overrides[get_db]()
     db = next(db_gen)
     account = ConnectedAccount(
         id=uuid.uuid4(),
@@ -66,7 +66,7 @@ def test_list_whatsapp_conversations_mocked(client: TestClient, monkeypatch: pyt
             }
         ]
 
-    monkeypatch.setattr(WhatsAppBridgeService, "list_conversations", fake_list_conversations)
+    monkeypatch.setattr(WhatsAppService, "list_conversations", fake_list_conversations)
 
     resp = client.get(f"/api/v1/whatsapp/conversations?account_id={account.id}&unread_only=true")
     assert resp.status_code == 200
@@ -95,7 +95,7 @@ def test_list_whatsapp_messages_mocked(client: TestClient, monkeypatch: pytest.M
             }
         ]
 
-    monkeypatch.setattr(WhatsAppBridgeService, "list_conversation_messages", fake_list_messages)
+    monkeypatch.setattr(WhatsAppService, "list_conversation_messages", fake_list_messages)
     resp = client.get(
         f"/api/v1/whatsapp/conversations/91999@s.whatsapp.net/messages?account_id={account.id}&limit=20"
     )
@@ -115,7 +115,7 @@ def test_send_whatsapp_message_mocked(client: TestClient, monkeypatch: pytest.Mo
         assert text == "Ping from Donna"
         return {"status": "sent"}
 
-    monkeypatch.setattr(WhatsAppBridgeService, "send_message", fake_send)
+    monkeypatch.setattr(WhatsAppService, "send_message", fake_send)
     resp = client.post(
         "/api/v1/whatsapp/send",
         json={"to": "91999@s.whatsapp.net", "text": "Ping from Donna"},

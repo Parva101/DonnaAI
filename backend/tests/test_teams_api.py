@@ -1,10 +1,14 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import uuid
 
 import pytest
 from fastapi.testclient import TestClient
 
+from app.core.db import get_db
+from app.main import fastapi_app
+from app.models import ConnectedAccount
 from app.services.teams_service import TeamsService
 
 
@@ -17,18 +21,38 @@ def _login(client: TestClient) -> dict:
     return resp.json()["user"]
 
 
+def _seed_teams_account(client: TestClient, user_id: str) -> ConnectedAccount:
+    db_gen = fastapi_app.dependency_overrides[get_db]()
+    db = next(db_gen)
+    account = ConnectedAccount(
+        id=uuid.uuid4(),
+        user_id=uuid.UUID(user_id),
+        provider="teams",
+        provider_account_id="teams-account-1",
+        account_email="teams-user@example.com",
+        access_token_encrypted="dummy",
+        refresh_token_encrypted=None,
+        scopes="Chat.ReadWrite",
+        account_metadata={"tenant": "common"},
+    )
+    db.add(account)
+    db.commit()
+    return account
+
+
 def test_teams_conversations_requires_auth(client: TestClient) -> None:
     resp = client.get("/api/v1/teams/conversations")
     assert resp.status_code == 401
 
 
 def test_list_teams_conversations_mocked(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
-    _login(client)
+    user = _login(client)
+    account = _seed_teams_account(client, user["id"])
 
     def fake_list(self, *, user_id, account_id=None, search=None, unread_only=False):
         return [
             {
-                "account_id": "8a9deef6-9f6f-43ba-af6a-35a8d4d9a2db",
+                "account_id": str(account.id),
                 "conversation_id": "19:chat-id",
                 "name": "Project Chat",
                 "sender": "Alice",
@@ -50,7 +74,8 @@ def test_list_teams_conversations_mocked(client: TestClient, monkeypatch: pytest
 
 
 def test_send_teams_message_mocked(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
-    _login(client)
+    user = _login(client)
+    account = _seed_teams_account(client, user["id"])
 
     def fake_send(self, *, user_id, conversation_id, text, account_id=None):
         assert conversation_id == "19:chat-id"
@@ -61,7 +86,7 @@ def test_send_teams_message_mocked(client: TestClient, monkeypatch: pytest.Monke
 
     resp = client.post(
         "/api/v1/teams/send",
-        json={"conversation_id": "19:chat-id", "text": "Hello Teams"},
+        json={"account_id": str(account.id), "conversation_id": "19:chat-id", "text": "Hello Teams"},
     )
     assert resp.status_code == 200
     payload = resp.json()

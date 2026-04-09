@@ -7,6 +7,9 @@ import uuid
 import pytest
 from fastapi.testclient import TestClient
 
+from app.core.db import get_db
+from app.main import fastapi_app
+from app.models import ConnectedAccount
 from app.services.slack_service import SlackService
 
 
@@ -19,6 +22,25 @@ def _login(client: TestClient) -> dict:
     return resp.json()["user"]
 
 
+def _seed_slack_account(client: TestClient, user_id: str) -> ConnectedAccount:
+    db_gen = fastapi_app.dependency_overrides[get_db]()
+    db = next(db_gen)
+    account = ConnectedAccount(
+        id=uuid.uuid4(),
+        user_id=uuid.UUID(user_id),
+        provider="slack",
+        provider_account_id="T123",
+        account_email="slack-workspace@example.com",
+        access_token_encrypted="dummy",
+        refresh_token_encrypted=None,
+        scopes="channels:history,chat:write",
+        account_metadata={"workspace": "Donna Slack"},
+    )
+    db.add(account)
+    db.commit()
+    return account
+
+
 def test_slack_conversations_requires_auth(client: TestClient) -> None:
     resp = client.get("/api/v1/slack/conversations")
     assert resp.status_code == 401
@@ -26,7 +48,8 @@ def test_slack_conversations_requires_auth(client: TestClient) -> None:
 
 def test_list_slack_conversations_mocked(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
     user = _login(client)
-    fake_account_id = uuid.uuid4()
+    seeded_account = _seed_slack_account(client, user["id"])
+    fake_account_id = seeded_account.id
 
     def fake_list(self, *, user_id, account_id=None, search=None, unread_only=False):
         assert str(user_id) == user["id"]
@@ -57,7 +80,8 @@ def test_list_slack_conversations_mocked(client: TestClient, monkeypatch: pytest
 
 
 def test_list_slack_messages_mocked(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
-    _login(client)
+    user = _login(client)
+    account = _seed_slack_account(client, user["id"])
 
     def fake_messages(self, *, user_id, conversation_id, account_id=None, limit=50):
         assert conversation_id == "C123"
@@ -75,7 +99,7 @@ def test_list_slack_messages_mocked(client: TestClient, monkeypatch: pytest.Monk
         ]
 
     monkeypatch.setattr(SlackService, "list_messages", fake_messages)
-    resp = client.get("/api/v1/slack/conversations/C123/messages?limit=20")
+    resp = client.get(f"/api/v1/slack/conversations/C123/messages?account_id={account.id}&limit=20")
     assert resp.status_code == 200
     data = resp.json()
     assert data["total"] == 1
@@ -83,7 +107,8 @@ def test_list_slack_messages_mocked(client: TestClient, monkeypatch: pytest.Monk
 
 
 def test_send_slack_message_mocked(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
-    _login(client)
+    user = _login(client)
+    account = _seed_slack_account(client, user["id"])
 
     def fake_send(self, *, user_id, conversation_id, text, account_id=None):
         assert conversation_id == "C123"
@@ -93,7 +118,7 @@ def test_send_slack_message_mocked(client: TestClient, monkeypatch: pytest.Monke
     monkeypatch.setattr(SlackService, "send_message", fake_send)
     resp = client.post(
         "/api/v1/slack/send",
-        json={"conversation_id": "C123", "text": "Hello from Donna"},
+        json={"account_id": str(account.id), "conversation_id": "C123", "text": "Hello from Donna"},
     )
     assert resp.status_code == 200
     data = resp.json()

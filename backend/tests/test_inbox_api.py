@@ -9,7 +9,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.core.db import get_db
-from app.main import app
+from app.main import fastapi_app
 from app.models import ConnectedAccount, Email
 
 
@@ -33,7 +33,7 @@ def client_with_threaded_emails(client: TestClient):
     user_data = _auth_login(client)
     user_id = user_data["id"]
 
-    db_gen = app.dependency_overrides[get_db]()
+    db_gen = fastapi_app.dependency_overrides[get_db]()
     db = next(db_gen)
 
     account = ConnectedAccount(

@@ -17,6 +17,7 @@ from app.schemas.teams import (
     TeamsSendRequest,
     TeamsSendResponse,
 )
+from app.services.chat_sync_service import ChatSyncService
 from app.services.teams_service import TeamsService
 
 router = APIRouter(prefix="/teams", tags=["teams"])
@@ -30,9 +31,9 @@ def list_teams_conversations(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> TeamsConversationListResponse:
-    svc = TeamsService(db)
+    svc = ChatSyncService(db)
     try:
-        conversations = svc.list_conversations(
+        conversations = svc.list_teams_conversations(
             user_id=current_user.id,
             account_id=account_id,
             unread_only=unread_only,
@@ -51,9 +52,9 @@ def list_teams_messages(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> TeamsMessageListResponse:
-    svc = TeamsService(db)
+    svc = ChatSyncService(db)
     try:
-        messages = svc.list_messages(
+        messages = svc.list_teams_messages(
             user_id=current_user.id,
             conversation_id=conversation_id,
             account_id=account_id,
@@ -75,9 +76,9 @@ def send_teams_message(
     if not payload.text.strip():
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Message text cannot be empty")
 
-    svc = TeamsService(db)
+    svc = ChatSyncService(db)
     try:
-        result = svc.send_message(
+        result = svc.send_teams_message(
             user_id=current_user.id,
             conversation_id=payload.conversation_id,
             text=payload.text,
