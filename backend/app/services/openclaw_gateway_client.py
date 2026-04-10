@@ -7,6 +7,8 @@ import os
 import re
 import shutil
 import subprocess
+import threading
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -17,6 +19,9 @@ from app.core.config import settings
 
 class OpenClawGatewayClient:
     _MIN_NODE_VERSION = (22, 12, 0)
+    _GATEWAY_START_TIMEOUT_SECONDS = 45.0
+    _gateway_lock = threading.Lock()
+    _gateway_process: subprocess.Popen[Any] | None = None
 
     def __init__(
         self,
@@ -86,6 +91,12 @@ class OpenClawGatewayClient:
         resolved = shutil.which(self.cli_path)
         if resolved:
             self._resolved_cli_executable = resolved
+            return self._resolved_cli_executable
+        # Graceful Docker/host fallback: if OPENCLAW_CLI_PATH is machine-specific and
+        # invalid in this runtime, try the default executable name on PATH.
+        fallback = shutil.which("openclaw")
+        if fallback:
+            self._resolved_cli_executable = fallback
             return self._resolved_cli_executable
         raise ValueError(
             "OpenClaw CLI not found. Set OPENCLAW_CLI_PATH to the openclaw executable path."
@@ -214,15 +225,15 @@ class OpenClawGatewayClient:
             env["PATH"] = node_dir
         return env
 
-    def _build_gateway_command(self, *, method: str, params: dict[str, Any]) -> list[str]:
+    def _build_openclaw_prefix(self) -> list[str]:
         cli_executable = self._resolve_cli_executable()
-        cmd: list[str]
         script_path = self._resolve_openclaw_script(cli_executable)
         if script_path is not None:
-            cmd = [self._resolve_node_executable(), str(script_path)]
-        else:
-            cmd = [cli_executable]
+            return [self._resolve_node_executable(), str(script_path)]
+        return [cli_executable]
 
+    def _build_gateway_command(self, *, method: str, params: dict[str, Any]) -> list[str]:
+        cmd = self._build_openclaw_prefix()
         if self.profile:
             cmd.extend(["--profile", self.profile])
         cmd.extend(
@@ -247,6 +258,129 @@ class OpenClawGatewayClient:
             elif self.gateway_password:
                 cmd.extend(["--password", self.gateway_password])
         return cmd
+
+    def _probe_gateway(self, *, timeout_seconds: float = 3.0) -> tuple[bool, str]:
+        cmd = self._build_gateway_command(method="health", params={})
+        try:
+            completed = subprocess.run(  # noqa: S603
+                cmd,
+                cwd=str(self.workdir),
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                check=False,
+                timeout=max(timeout_seconds, 1.0),
+                env=self._build_subprocess_env(),
+            )
+        except Exception as exc:
+            return False, str(exc)
+        if completed.returncode == 0:
+            return True, ""
+        details = (completed.stderr or completed.stdout or "").strip()
+        return False, details
+
+    @classmethod
+    def _gateway_process_running(cls) -> bool:
+        process = cls._gateway_process
+        return process is not None and process.poll() is None
+
+    def _start_local_gateway(self) -> tuple[bool, str]:
+        cmd = self._build_openclaw_prefix()
+        if self.profile:
+            cmd.extend(["--profile", self.profile])
+        cmd.extend(["gateway", "run", "--dev", "--allow-unconfigured", "--ws-log", "compact"])
+
+        runtime_dir = (self.workdir / ".runtime" / "openclaw").resolve()
+        runtime_dir.mkdir(parents=True, exist_ok=True)
+        gateway_log = runtime_dir / "gateway-supervisor.log"
+        with gateway_log.open("a", encoding="utf-8") as logf:
+            process = subprocess.Popen(  # noqa: S603
+                cmd,
+                cwd=str(self.workdir),
+                stdout=logf,
+                stderr=logf,
+                env=self._build_subprocess_env(),
+            )
+        self.__class__._gateway_process = process
+        return True, str(gateway_log)
+
+    def _ensure_local_gateway(self) -> None:
+        # Explicit remote gateway URL means caller manages availability.
+        if self.gateway_url:
+            return
+
+        ok, details = self._probe_gateway(timeout_seconds=6.0)
+        if ok:
+            return
+        if "timed out" in (details or "").lower():
+            return
+
+        with self.__class__._gateway_lock:
+            ok, details = self._probe_gateway(timeout_seconds=6.0)
+            if ok:
+                return
+            if "timed out" in (details or "").lower():
+                return
+
+            if not self.__class__._gateway_process_running():
+                _, log_path = self._start_local_gateway()
+            else:
+                log_path = str((self.workdir / ".runtime" / "openclaw" / "gateway-supervisor.log").resolve())
+
+            deadline = time.monotonic() + self._GATEWAY_START_TIMEOUT_SECONDS
+            last_error = details
+            while time.monotonic() < deadline:
+                ok, details = self._probe_gateway(timeout_seconds=6.0)
+                if ok:
+                    return
+                last_error = details or last_error
+                if not self.__class__._gateway_process_running():
+                    break
+                time.sleep(0.5)
+
+            if "timed out" in (last_error or "").lower():
+                return
+            raise ValueError(
+                "OpenClaw gateway is unavailable and auto-start failed. "
+                f"Check {log_path}. Last error: {last_error or 'unknown error'}"
+            )
+
+    def ensure_channel_account(self) -> None:
+        if not self.channel:
+            return
+
+        account = self.account_id or "default"
+        cmd = self._build_openclaw_prefix()
+        if self.profile:
+            cmd.extend(["--profile", self.profile])
+        cmd.extend(
+            [
+                "channels",
+                "add",
+                "--channel",
+                self.channel,
+                "--account",
+                account,
+            ]
+        )
+        completed = subprocess.run(  # noqa: S603
+            cmd,
+            cwd=str(self.workdir),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            check=False,
+            timeout=60,
+            env=self._build_subprocess_env(),
+        )
+        if completed.returncode != 0:
+            details = (completed.stderr or completed.stdout or "").strip()
+            raise ValueError(
+                details
+                or f"Failed to add OpenClaw channel `{self.channel}` account `{account}`."
+            )
 
     @staticmethod
     def _parse_gateway_json(output: str) -> Any:
@@ -289,6 +423,7 @@ class OpenClawGatewayClient:
         *,
         timeout_ms: int | None = None,
     ) -> Any:
+        self._ensure_local_gateway()
         cmd = self._build_gateway_command(method=method, params=params or {})
         timeout_seconds = (timeout_ms or self.gateway_timeout_ms) / 1_000
         try:

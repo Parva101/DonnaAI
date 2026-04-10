@@ -147,15 +147,29 @@ class WhatsAppService:
         )
 
     def start_listener(self) -> dict[str, Any]:
-        payload = self.openclaw.call(
-            "web.login.start",
-            {
-                "accountId": self.account_id,
-                "force": False,
-                "timeoutMs": min(self.openclaw.gateway_timeout_ms, 30_000),
-            },
-            timeout_ms=max(self.openclaw.gateway_timeout_ms, 30_000),
-        )
+        try:
+            payload = self.openclaw.call(
+                "web.login.start",
+                {
+                    "accountId": self.account_id,
+                    "force": False,
+                    "timeoutMs": min(self.openclaw.gateway_timeout_ms, 30_000),
+                },
+                timeout_ms=max(self.openclaw.gateway_timeout_ms, 30_000),
+            )
+        except ValueError as exc:
+            if "provider is not available" not in str(exc).lower():
+                raise
+            self.openclaw.ensure_channel_account()
+            payload = self.openclaw.call(
+                "web.login.start",
+                {
+                    "accountId": self.account_id,
+                    "force": False,
+                    "timeoutMs": min(self.openclaw.gateway_timeout_ms, 30_000),
+                },
+                timeout_ms=max(self.openclaw.gateway_timeout_ms, 30_000),
+            )
         qr_data_url = payload.get("qrDataUrl") if isinstance(payload, dict) else None
         return {
             "running": True,
@@ -181,6 +195,12 @@ class WhatsAppService:
                 "state_updated_at": now.isoformat(),
                 "state_age_seconds": None,
             }
+        if not snapshot:
+            try:
+                self.openclaw.ensure_channel_account()
+                snapshot = self.openclaw.channel_snapshot() or {}
+            except Exception:
+                snapshot = {}
 
         connected = bool(snapshot.get("connected"))
         running = bool(snapshot.get("running"))
@@ -258,7 +278,7 @@ class WhatsAppService:
                     if isinstance(message, str) and message.strip():
                         qr_text = message
             except Exception as exc:
-                if not qr_text and connection_state == "error":
+                if not qr_text:
                     qr_text = str(exc)
 
         return {
