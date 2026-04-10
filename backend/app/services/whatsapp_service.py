@@ -170,6 +170,9 @@ class WhatsAppService:
                 },
                 timeout_ms=max(self.openclaw.gateway_timeout_ms, 30_000),
             )
+        # Prime the login waiter briefly so OpenClaw can surface immediate pairing
+        # errors and complete channel start when scan happens quickly.
+        self._wait_login_progress(timeout_ms=1_000)
         qr_data_url = payload.get("qrDataUrl") if isinstance(payload, dict) else None
         return {
             "running": True,
@@ -178,6 +181,20 @@ class WhatsAppService:
             "qr_data_uri": qr_data_url if isinstance(qr_data_url, str) else None,
             "message": payload.get("message") if isinstance(payload, dict) else None,
         }
+
+    def _wait_login_progress(self, *, timeout_ms: int = 1_000) -> dict[str, Any] | None:
+        try:
+            payload = self.openclaw.call(
+                "web.login.wait",
+                {
+                    "accountId": self.account_id,
+                    "timeoutMs": max(timeout_ms, 1_000),
+                },
+                timeout_ms=max(timeout_ms + 2_000, 3_000),
+            )
+        except Exception:
+            return None
+        return payload if isinstance(payload, dict) else None
 
     def status(self) -> dict[str, Any]:
         now = datetime.now(timezone.utc)
@@ -201,6 +218,21 @@ class WhatsAppService:
                 snapshot = self.openclaw.channel_snapshot() or {}
             except Exception:
                 snapshot = {}
+
+        wait_result: dict[str, Any] | None = None
+        if snapshot:
+            try:
+                linked_now = bool(snapshot.get("linked"))
+                connected_now = bool(snapshot.get("connected"))
+            except Exception:
+                linked_now = False
+                connected_now = False
+            if not linked_now and not connected_now:
+                wait_result = self._wait_login_progress(timeout_ms=1_000)
+                if wait_result and wait_result.get("connected"):
+                    refreshed = self.openclaw.channel_snapshot() or {}
+                    if refreshed:
+                        snapshot = refreshed
 
         connected = bool(snapshot.get("connected"))
         running = bool(snapshot.get("running"))
@@ -248,7 +280,9 @@ class WhatsAppService:
                 state_age_seconds = max((now - dt).total_seconds(), 0.0)
 
         qr_data_uri: str | None = None
-        qr_text: str | None = last_error or None
+        qr_text: str | None = (
+            str(wait_result.get("message") or "").strip() if isinstance(wait_result, dict) else None
+        ) or last_error or None
         if linked and not connected:
             if running:
                 qr_text = "WhatsApp is linked and reconnecting."
