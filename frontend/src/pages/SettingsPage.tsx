@@ -48,7 +48,7 @@ const platforms: PlatformConfig[] = [
   { name: "Gmail", desc: "Email with smart tabs", icon: Mail, provider: "google", color: "text-red-400", connectUrl: GOOGLE_CONNECT_URL },
   { name: "Slack", desc: "Messages & channels", icon: MessageSquare, provider: "slack", color: "text-green-400", connectUrl: SLACK_CONNECT_URL },
   { name: "Teams", desc: "Microsoft Teams chat", icon: MessageSquare, provider: "teams", color: "text-violet-400", connectUrl: TEAMS_CONNECT_URL },
-  { name: "WhatsApp", desc: "Personal number bridge", icon: Phone, provider: "whatsapp", color: "text-emerald-400", connectUrl: WHATSAPP_CONNECT_URL },
+  { name: "WhatsApp", desc: "Personal number messages", icon: Phone, provider: "whatsapp", color: "text-emerald-400", connectUrl: WHATSAPP_CONNECT_URL },
   { name: "Google Calendar", desc: "Events & scheduling", icon: Calendar, provider: "google", color: "text-blue-400", connectUrl: GOOGLE_CONNECT_URL },
   { name: "Spotify", desc: "Music playback control", icon: Music, provider: "spotify", color: "text-green-400", connectUrl: SPOTIFY_CONNECT_URL },
   { name: "News Sources", desc: "RSS, NewsAPI, Hacker News", icon: Newspaper, provider: "news", color: "text-orange-400" },
@@ -118,7 +118,8 @@ export function SettingsPage() {
     };
 
     loadStatus();
-    const timer = window.setInterval(loadStatus, 10_000);
+    // Keep this >= QR probe latency (~15s+) to avoid overlapping status requests.
+    const timer = window.setInterval(loadStatus, 25_000);
     return () => {
       cancelled = true;
       window.clearInterval(timer);
@@ -128,6 +129,8 @@ export function SettingsPage() {
   // Show success message from OAuth redirect
   useEffect(() => {
     const connected = searchParams.get("connected");
+    const pending = searchParams.get("pending");
+    const pendingState = searchParams.get("state");
     const oauthError = searchParams.get("error");
     const oauthProvider = searchParams.get("provider");
     const oauthDetail = searchParams.get("detail");
@@ -141,6 +144,18 @@ export function SettingsPage() {
           .catch(() => {});
       }
       const t = setTimeout(() => setSuccessMsg(null), 5000);
+      return () => clearTimeout(t);
+    }
+
+    if (pending) {
+      const stateText = pendingState ? ` (${pendingState.replaceAll("_", " ")})` : "";
+      setSuccessMsg(`Started ${pending} setup${stateText}. Scan QR to finish linking.`);
+      if (user) {
+        listConnectedAccounts()
+          .then(setConnectedAccounts)
+          .catch(() => {});
+      }
+      const t = setTimeout(() => setSuccessMsg(null), 7000);
       return () => clearTimeout(t);
     }
 
@@ -444,19 +459,25 @@ export function SettingsPage() {
                     {p.provider === "whatsapp" && connected && whatsappStatus && (
                       <div className="ml-14 rounded-lg border border-border/50 bg-secondary/20 p-3 space-y-2">
                         <p className="text-xs text-muted-foreground">
-                          Bridge status:{" "}
+                          OpenClaw status:{" "}
                           <span className={whatsappStatus.running ? "text-green-400" : "text-amber-400"}>
                             {whatsappStatus.connection_state ?? (whatsappStatus.running ? "running" : "not running")}
                           </span>
                           {whatsappStatus.pid ? ` (pid ${whatsappStatus.pid})` : ""}
                         </p>
-                        {whatsappStatus.connection_state === "connected" ? (
+                        {whatsappStatus.connection_state === "connected" || whatsappStatus.connection_state === "linked" ? (
                           <div className="rounded-md border border-emerald-500/30 bg-emerald-500/5 p-2">
-                            <p className="text-xs font-medium text-emerald-300">WhatsApp linked successfully</p>
+                            <p className="text-xs font-medium text-emerald-300">
+                              {whatsappStatus.connection_state === "connected"
+                                ? "WhatsApp linked successfully"
+                                : "WhatsApp linked"}
+                            </p>
                             <p className="mt-1 text-[11px] text-muted-foreground">
-                              {whatsappStatus.me_jid
+                              {whatsappStatus.connection_state === "linked"
+                                ? (whatsappStatus.qr_text || "Device is linked. Start the channel listener to reconnect.")
+                                : whatsappStatus.me_jid
                                 ? `Connected as ${whatsappStatus.me_jid}`
-                                : "Bridge is authenticated and active."}
+                                : "OpenClaw channel is authenticated and active."}
                             </p>
                           </div>
                         ) : (
@@ -467,6 +488,11 @@ export function SettingsPage() {
                                 alt="WhatsApp QR"
                                 className="h-40 w-40 rounded-md border border-border bg-background p-1"
                               />
+                            )}
+                            {!whatsappStatus.qr_data_uri && (
+                              <p className="text-[11px] text-amber-400">
+                                Generating QR... this can take up to ~20 seconds.
+                              </p>
                             )}
                             <p className="text-[11px] text-muted-foreground">
                               Scan this QR in WhatsApp: Linked devices -&gt; Link a device.

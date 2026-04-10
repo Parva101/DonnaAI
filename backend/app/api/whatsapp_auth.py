@@ -28,7 +28,13 @@ def whatsapp_connect(
     try:
         svc.start_listener()
         svc.ensure_connected_account(current_user)
-        redirect_url = f"{settings.frontend_url}/settings?{urlencode({'connected': 'whatsapp'})}"
+        status_payload = svc.status()
+        state = str(status_payload.get("connection_state") or "").strip().lower()
+        if state in {"connected", "linked"}:
+            query = {"connected": "whatsapp"}
+        else:
+            query = {"pending": "whatsapp", "state": state or "waiting_qr"}
+        redirect_url = f"{settings.frontend_url}/settings?{urlencode(query)}"
     except Exception as exc:
         redirect_url = f"{settings.frontend_url}/settings?{urlencode({'error': 'whatsapp_connect_failed', 'provider': 'whatsapp', 'detail': str(exc)})}"
     return RedirectResponse(url=redirect_url, status_code=status.HTTP_302_FOUND)
